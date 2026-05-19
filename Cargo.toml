@@ -1,6 +1,6 @@
 [package]
 name = "freemkv"
-version = "0.23.2"
+version = "0.24.0"
 edition = "2024"
 rust-version = "1.86"
 license = "AGPL-3.0-only"
@@ -12,10 +12,23 @@ name = "freemkv"
 path = "src/main.rs"
 
 [dependencies]
-libfreemkv = "0.23"
+libfreemkv = "0.24"
 isolang = "2"
 tracing-subscriber = "0.3"
 ureq = { version = "2", features = ["json"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 serde_json = "1"
 libc = "0.2"
+# Global allocator. The mux consumer thread frees PesPacket buffers
+# whose backing Vec<u8> was allocated by the demux thread — musl's
+# mallocng cross-thread free path was visibly slowing the null://
+# benchmark relative to autorip (which already uses mimalloc).
+# Matching allocators across binaries makes perf numbers comparable.
+mimalloc = "0.1"
+
+# Local development override: build freemkv against the sibling
+# libfreemkv repo so iteration loops pick up local changes immediately
+# without a crates.io round-trip. Must be removed (along with bumping
+# the `libfreemkv = "0.NN"` constraint) before `cargo publish`.
+[patch.crates-io]
+libfreemkv = { path = "../libfreemkv" }

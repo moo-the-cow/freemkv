@@ -778,9 +778,11 @@ fn scan_titles(source: &str, keydb_path: &Option<String>) -> Option<Vec<libfreem
 
     match parsed {
         libfreemkv::StreamUrl::Iso { ref path } => {
-            let mut reader =
-                libfreemkv::mux::iso::IsoSectorReader::open(&path.to_string_lossy()).ok()?;
-            let capacity = reader.capacity_sectors();
+            let mut reader = libfreemkv::FileSectorSource::open(path).ok()?;
+            let capacity =
+                <libfreemkv::FileSectorSource as libfreemkv::SectorSource>::capacity_sectors(
+                    &reader,
+                );
             let disc = libfreemkv::Disc::scan_image(&mut reader, capacity, &scan_opts).ok()?;
             Some(disc.titles)
         }

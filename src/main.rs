@@ -17,6 +17,9 @@ mod output;
 mod pipe;
 mod strings;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn main() {
     if std::env::var("RUST_LOG").is_ok() {
         tracing_subscriber::fmt::init();
