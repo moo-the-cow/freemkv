@@ -2,3 +2,6 @@
 target/
 .claude/
 .cargo/
+
+# session scratch — never track (may contain RE breadcrumbs)
+scratch/
