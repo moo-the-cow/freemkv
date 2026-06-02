@@ -35,12 +35,12 @@ cargo +1.86 test --tests
 cargo +1.86 build --release
 ```
 
-Run `(internal)/scripts/precommit.sh` to execute all checks across the workspace:
+Run the workspace pre-commit script to execute all checks across the workspace:
 ```bash
 cd ~/freemkv
-(internal)/scripts/precommit.sh              # all crates
-(internal)/scripts/precommit.sh autorip      # one crate
-(internal)/scripts/precommit.sh --no-tests   # fmt+clippy only (faster)
+./precommit.sh              # all crates
+./precommit.sh autorip      # one crate
+./precommit.sh --no-tests   # fmt+clippy only (faster)
 ```
 
 ---
@@ -165,18 +165,18 @@ Build matrix includes 5 targets:
 - `aarch64-apple-darwin` (works; x86_64-darwin has pre-existing linker issue)
 - `x86_64-pc-windows-msvc`
 
-Watchtower on rip1 polls every ~30s and auto-deploys from `ghcr.io/freemkv/autorip:latest`.
+Watchtower on the deploy host polls every ~30s and auto-deploys from `ghcr.io/freemkv/autorip:latest`.
 
 ---
 
-## Phase 4: Production Deployment to rip1
+## Phase 4: Production Deployment
 
 ### Manual Deploy (if needed)
 
 **Pause watchtower first if a rip may be in progress:**
 ```bash
 # Check current state
-curl -s https://rip1.docker.internal.localhost/api/state | jq '.status'
+curl -s https://deploy.example.com/api/state | jq '.status'
 # If "ripping", wait for completion before deploying
 ```
 
@@ -186,12 +186,12 @@ Build and deploy:
 cd ~/freemkv/autorip
 cargo +1.86 build --release --target x86_64-unknown-linux-musl
 
-# Deploy to rip1 (adjust version as needed)
-scp target/x86_64-unknown-linux-musl/release/autorip rip@rip1.docker.internal.localhost:/tmp/autorip-0.X.Y
-ssh rip@rip1.docker.internal.localhost << 'DEPLOY'
+# Deploy to the host (adjust version as needed)
+scp target/x86_64-unknown-linux-musl/release/autorip deploy@deploy.example.com:/tmp/autorip-0.X.Y
+ssh deploy@deploy.example.com << 'DEPLOY'
 sudo docker cp /tmp/autorip-0.X.Y autorip:/app/autorip
 sudo docker restart autorip
-sleep 5 && curl http://rip1.docker.internal.localhost/api/version
+sleep 5 && curl http://deploy.example.com/api/version
 DEPLOY
 ```
 
@@ -199,7 +199,7 @@ DEPLOY
 
 ### Enable Debug Logging (for troubleshooting)
 ```bash
-curl -X POST https://rip1.docker.internal.localhost/api/debug \
+curl -X POST https://deploy.example.com/api/debug \
   -H "Content-Type: application/json" \
   -d '{"enabled":true}'
 
@@ -254,7 +254,7 @@ If still failing after 15 min, **STOP** — investigate index sync issues. Do no
 # From workspace root
 cargo +1.86 clippy --locked -- -D warnings
 cargo +1.86 test --tests
-(internal)/scripts/precommit.sh
+./precommit.sh
 ```
 
 **STOP IF PRE-COMMIT FAILS** — do not proceed until all checks pass.
@@ -290,7 +290,7 @@ git tag -a v0.X.Y -m "v0.X.Y" && git push origin v0.X.Y --force
 
 5. **abort_on_lost_secs=0 means "require perfect rip"**, not "never abort". Default is 0 (perfect-required); set e.g. 30 to tolerate up to 30s of main-movie loss before aborting after retries exhausted.
 
-6. **Pause watchtower before pushing autorip** if a rip is in progress. See `(internal)/memory/feedback_release_kills_rip_2026_04_26.md`. **STOP and wait for current rip to complete.**
+6. **Pause watchtower before pushing autorip** if a rip is in progress. **STOP and wait for current rip to complete.**
 
 ---
 
@@ -305,10 +305,10 @@ git tag -a v0.X.Y -m "v0.X.Y" && git push origin v0.X.Y --force
 ## References
 
 - CI workflows: `.github/workflows/ci.yml`, `.github/workflows/release.yml`
-- Pre-commit script: `(internal)/scripts/precommit.sh`
-- Release automation: `(internal)/scripts/release.sh`
-- Test plan: `(internal)/docs/TEST_PLAN.md`
-- Watchtower pause guidance: `(internal)/memory/feedback_release_kills_rip_2026_04_26.md`
+- Pre-commit script: workspace `precommit.sh`
+- Release automation: workspace `release.sh`
+- Test plan: internal test plan
+- Watchtower pause guidance: see release notes
 
 ## Critical Warnings (READ BEFORE STARTING)
 

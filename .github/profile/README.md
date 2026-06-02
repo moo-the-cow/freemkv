@@ -119,12 +119,12 @@ Open `localhost:8080`. Configure KEYDB URL and TMDB key in Settings. Insert disc
 ### Examples
 
 ```bash
-freemkv disc:// mkv://Dune.mkv                     # Rip to MKV
-freemkv disc:// m2ts://Dune.m2ts                    # Rip to transport stream
-freemkv iso://Dune.iso mkv://Dune.mkv               # ISO to MKV
-freemkv m2ts://Dune.m2ts mkv://Dune.mkv             # Remux
-freemkv disc:// network://10.0.0.1:9000            # Stream over network
-freemkv network://0.0.0.0:9000 mkv://Dune.mkv      # Receive from network
+freemkv disc:// mkv://Movie.mkv                     # Rip to MKV
+freemkv disc:// m2ts://Movie.m2ts                   # Rip to transport stream
+freemkv iso://Movie.iso mkv://Movie.mkv             # ISO to MKV
+freemkv m2ts://Movie.m2ts mkv://Movie.mkv           # Remux
+freemkv disc:// network://192.0.2.10:9000           # Stream over network
+freemkv network://0.0.0.0:9000 mkv://Movie.mkv     # Receive from network
 freemkv disc:// stdio:// | ffmpeg -i pipe:0 ...     # Pipe to ffmpeg
 freemkv info disc://                                 # Show disc info
 ```
