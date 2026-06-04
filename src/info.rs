@@ -571,3 +571,55 @@ fn base64_decode(input: &str) -> Vec<u8> {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{base64_decode, base64_encode, format_date, hex_dump};
+
+    #[test]
+    fn base64_encode_rfc4648_vectors() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn base64_round_trips_arbitrary_lengths() {
+        // Covers all three padding cases (len % 3 = 0/1/2) across many sizes.
+        for len in 0..40usize {
+            let data: Vec<u8> = (0..len)
+                .map(|i| (i as u8).wrapping_mul(37).wrapping_add(11))
+                .collect();
+            assert_eq!(
+                base64_decode(&base64_encode(&data)),
+                data,
+                "round-trip failed at len {len}"
+            );
+        }
+    }
+
+    #[test]
+    fn format_date_standard_yyyymmdd() {
+        assert_eq!(format_date("20211231"), "2021-12-31");
+        assert_eq!(format_date("19991009"), "1999-10-09");
+    }
+
+    #[test]
+    fn format_date_too_short_passes_through() {
+        assert_eq!(format_date("2021"), "2021");
+        assert_eq!(format_date(""), "");
+    }
+
+    #[test]
+    fn hex_dump_formats_lowercase_and_wraps_at_32() {
+        assert_eq!(hex_dump(&[0x00, 0x0f, 0xa0, 0xff]), "00 0f a0 ff");
+        let data: Vec<u8> = (0..33u8).collect();
+        let dump = hex_dump(&data);
+        assert!(dump.contains('\n'), "should wrap after 32 bytes: {dump}");
+        assert!(dump.starts_with("00 01 02"), "{dump}");
+    }
+}
