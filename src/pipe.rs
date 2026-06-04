@@ -249,6 +249,40 @@ pub fn run(source: &str, dest: &str, args: &[String]) -> bool {
 // ── The pipeline engine ─────────────────────────────────────────────────────
 
 /// Disc source: one open, one scan, one stream. No double init.
+/// ScanOptions for a keyless structure scan — libfreemkv captures structure +
+/// AACS inputs but resolves no key. The CLI resolves the key afterward from the
+/// local keydb (see [`apply_local_key`]).
+fn keyless_scan_opts() -> libfreemkv::ScanOptions {
+    libfreemkv::ScanOptions {
+        disable_keydb: true,
+        ..Default::default()
+    }
+}
+
+/// Resolve an AACS key for a keyless-scanned `disc` from the local keydb and
+/// apply it via `Disc::decrypt_with`. No-op for an unencrypted disc (no AACS
+/// inputs). The CLI is keydb-only; candidates are tried in order and the first
+/// that derives unit keys wins. `--keydb <path>` overrides the default location.
+fn apply_local_key(disc: &mut libfreemkv::Disc, keydb_path: &Option<String>) {
+    use freemkv_keysources::KeySource;
+    let Some(inputs) = disc.inputs() else {
+        return; // not AACS-encrypted (or no inputs captured)
+    };
+    let path = keydb_path
+        .clone()
+        .map(std::path::PathBuf::from)
+        .or_else(|| libfreemkv::keydb::default_path().ok())
+        .unwrap_or_else(|| std::path::PathBuf::from("keydb.cfg"));
+    let source = freemkv_keysources::KeydbSource::new(path);
+    if let Ok(candidates) = source.resolve(&inputs) {
+        for key in candidates {
+            if disc.decrypt_with(key).is_ok() {
+                break;
+            }
+        }
+    }
+}
+
 fn pipe_disc(
     source: &str,
     dest: &str,
@@ -273,14 +307,9 @@ fn pipe_disc(
     let _ = drive.probe_disc();
     drive.lock_tray();
 
-    let scan_opts = match keydb_path {
-        Some(p) => libfreemkv::ScanOptions {
-            keydb_path: Some(p.into()),
-            ..Default::default()
-        },
-        None => libfreemkv::ScanOptions::default(),
-    };
-    let disc = libfreemkv::Disc::scan(&mut drive, &scan_opts).map_err(|e| format!("{}", e))?;
+    let mut disc =
+        libfreemkv::Disc::scan(&mut drive, &keyless_scan_opts()).map_err(|e| format!("{}", e))?;
+    apply_local_key(&mut disc, keydb_path);
 
     if title_idx >= disc.titles.len() {
         return Err(format!(
@@ -556,14 +585,7 @@ fn disc_to_iso(
     let _ = drive.init();
     let _ = drive.probe_disc();
 
-    let scan_opts = match keydb_path {
-        Some(p) => libfreemkv::ScanOptions {
-            keydb_path: Some(p.into()),
-            ..Default::default()
-        },
-        None => libfreemkv::ScanOptions::default(),
-    };
-    let disc = match libfreemkv::Disc::scan(&mut drive, &scan_opts) {
+    let mut disc = match libfreemkv::Disc::scan(&mut drive, &keyless_scan_opts()) {
         Ok(d) => d,
         Err(e) => {
             out.raw(
@@ -573,6 +595,9 @@ fn disc_to_iso(
             return;
         }
     };
+    // Resolve + apply the AACS key so the keys persist in the mapfile during
+    // disc→ISO copy (the mux step reads them back to decrypt).
+    apply_local_key(&mut disc, keydb_path);
 
     let disc_name = sanitize_name(disc.meta_title.as_deref().unwrap_or(&disc.volume_id));
     let (iso_path, is_null) = match &parsed_dest {
@@ -771,15 +796,11 @@ fn disc_to_iso(
 
 /// Scan any source for its title list. Returns None if source has no titles
 /// (e.g. a single M2TS file, network stream).
-fn scan_titles(source: &str, keydb_path: &Option<String>) -> Option<Vec<libfreemkv::DiscTitle>> {
+fn scan_titles(source: &str, _keydb_path: &Option<String>) -> Option<Vec<libfreemkv::DiscTitle>> {
     let parsed = libfreemkv::parse_url(source);
-    let scan_opts = match keydb_path {
-        Some(p) => libfreemkv::ScanOptions {
-            keydb_path: Some(p.into()),
-            ..Default::default()
-        },
-        None => libfreemkv::ScanOptions::default(),
-    };
+    // Listing titles needs only the disc structure (navigation is in the clear);
+    // no key resolution required, so scan keyless.
+    let scan_opts = keyless_scan_opts();
 
     match parsed {
         libfreemkv::StreamUrl::Iso { ref path } => {

@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 libfreemkv = "0.27"
+freemkv-keysources = "0.27"
 isolang = "2"
 tracing-subscriber = "0.3"
 ureq = { version = "2", features = ["json"] }
@@ -25,3 +26,12 @@ libc = "0.2"
 # benchmark relative to autorip (which already uses mimalloc).
 # Matching allocators across binaries makes perf numbers comparable.
 mimalloc = "0.1"
+
+# ─── DEV-ONLY LOCAL PATCH — DO NOT COMMIT/PUSH ───────────────────────────────
+# CI builds deps from crates.io. libfreemkv 0.27.5 and freemkv-keysources are
+# not published yet; point them at local working copies for 0.27.5 development.
+# Before release: publish in order (libfreemkv → freemkv-keysources → freemkv)
+# and DELETE this section.
+[patch.crates-io]
+libfreemkv = { path = "../libfreemkv" }
+freemkv-keysources = { path = "../freemkv-keysources" }
