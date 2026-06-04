@@ -183,6 +183,15 @@ pub fn run(source: &str, dest: &str, args: &[String]) -> bool {
     let mut ok = true;
     let is_disc = matches!(parsed_source, libfreemkv::StreamUrl::Disc { .. });
 
+    // For an ISO source, resolve the AACS unit keys ONCE (keyless scan → local
+    // keydb → decrypt_with) and hand them to each title's stream — libfreemkv
+    // does no lookup. A disc source resolves per-title inside `pipe_disc`.
+    let iso_unit_keys = if is_disc {
+        Vec::new()
+    } else {
+        resolve_iso_unit_keys(source, &keydb_path)
+    };
+
     for (title_idx, dest_url) in &jobs {
         // Print title info if we have it
         if let (Some(idx), Some(t)) = (title_idx, &titles) {
@@ -228,12 +237,11 @@ pub fn run(source: &str, dest: &str, args: &[String]) -> bool {
                 ok = false;
             }
         } else {
-            // Non-disc: use input() as before
+            // Non-disc (ISO): hand in the caller-resolved unit keys.
             let opts = libfreemkv::InputOptions {
-                keydb_path: keydb_path.clone(),
+                unit_keys: iso_unit_keys.clone(),
                 title_index: *title_idx,
                 raw,
-                ..Default::default()
             };
             if let Err(e) = pipe(source, dest_url, &opts, &out) {
                 out.raw(Normal, &fmt_err(&e));
@@ -253,9 +261,31 @@ pub fn run(source: &str, dest: &str, args: &[String]) -> bool {
 /// AACS inputs but resolves no key. The CLI resolves the key afterward from the
 /// local keydb (see [`apply_local_key`]).
 fn keyless_scan_opts() -> libfreemkv::ScanOptions {
-    libfreemkv::ScanOptions {
-        disable_keydb: true,
-        ..Default::default()
+    libfreemkv::ScanOptions::default()
+}
+
+/// Resolve an ISO's AACS unit keys once: keyless scan → local keydb →
+/// `decrypt_with`. libfreemkv does no lookup, so the CLI resolves here and the
+/// keys ride into each title's stream. Empty for an unencrypted ISO or when no
+/// key resolves.
+fn resolve_iso_unit_keys(source: &str, keydb_path: &Option<String>) -> Vec<(u32, [u8; 16])> {
+    let path = match libfreemkv::parse_url(source) {
+        libfreemkv::StreamUrl::Iso { path } => path,
+        _ => return Vec::new(),
+    };
+    let Ok(mut reader) = libfreemkv::FileSectorSource::open(&path) else {
+        return Vec::new();
+    };
+    let capacity =
+        <libfreemkv::FileSectorSource as libfreemkv::SectorSource>::capacity_sectors(&reader);
+    let Ok(mut disc) = libfreemkv::Disc::scan_image(&mut reader, capacity, &keyless_scan_opts())
+    else {
+        return Vec::new();
+    };
+    apply_local_key(&mut disc, keydb_path);
+    match disc.decrypt_keys() {
+        libfreemkv::DecryptKeys::Aacs { unit_keys, .. } => unit_keys,
+        _ => Vec::new(),
     }
 }
 
