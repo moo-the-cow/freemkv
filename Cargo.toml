@@ -6,6 +6,7 @@ rust-version = "1.86"
 license = "AGPL-3.0-only"
 description = "Open source 4K UHD / Blu-ray / DVD backup tool"
 repository = "https://github.com/freemkv/freemkv"
+exclude = []
 
 [[bin]]
 name = "freemkv"
@@ -26,12 +27,3 @@ libc = "0.2"
 # benchmark relative to autorip (which already uses mimalloc).
 # Matching allocators across binaries makes perf numbers comparable.
 mimalloc = "0.1"
-
-# ─── DEV-ONLY LOCAL PATCH — DO NOT COMMIT/PUSH ───────────────────────────────
-# CI builds deps from crates.io. libfreemkv 0.27.5 and freemkv-keysources are
-# not published yet; point them at local working copies for 0.27.5 development.
-# Before release: publish in order (libfreemkv → freemkv-keysources → freemkv)
-# and DELETE this section.
-[patch.crates-io]
-libfreemkv = { path = "../libfreemkv" }
-freemkv-keysources = { path = "../freemkv-keysources" }
