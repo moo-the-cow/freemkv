@@ -180,6 +180,7 @@
     "E7002": "AACS handshake failed — could not allocate AGID",
     "E7003": "AACS handshake failed",
     "E7013": "Decryption failed",
+    "E7022": "no key found for disc {hash} — cannot decrypt. Re-run with --raw to copy without decryption.",
     "E8000": "Cannot connect to KEYDB server: {detail}",
     "E8001": "KEYDB download failed (HTTP {detail})",
     "E8002": "KEYDB is empty or invalid",

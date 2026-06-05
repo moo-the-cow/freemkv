@@ -180,6 +180,7 @@
     "E7002": "Handshake AACS falhou — nao foi possivel alocar AGID",
     "E7003": "Handshake AACS falhou",
     "E7013": "Descriptografia falhou",
+    "E7022": "nenhuma chave encontrada para o disco {hash} — nao e possivel descriptografar. Execute novamente com --raw para copiar sem descriptografia.",
     "E8000": "Nao foi possivel conectar ao servidor KEYDB: {detail}",
     "E8001": "Download do KEYDB falhou (HTTP {detail})",
     "E8002": "KEYDB vazio ou invalido",

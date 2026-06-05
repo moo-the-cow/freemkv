@@ -180,6 +180,7 @@
     "E7002": "Handshake AACS fallito — impossibile allocare AGID",
     "E7003": "Handshake AACS fallito",
     "E7013": "Decrittazione fallita",
+    "E7022": "nessuna chiave trovata per il disco {hash} — impossibile decrittare. Riesegui con --raw per copiare senza decrittazione.",
     "E8000": "Impossibile connettersi al server KEYDB: {detail}",
     "E8001": "Download KEYDB fallito (HTTP {detail})",
     "E8002": "KEYDB vuoto o non valido",

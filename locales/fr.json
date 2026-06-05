@@ -180,6 +180,7 @@
     "E7002": "Echec de la negociation AACS — impossible d'allouer un AGID",
     "E7003": "Echec de la negociation AACS",
     "E7013": "Echec du dechiffrement",
+    "E7022": "aucune cle trouvee pour le disque {hash} — dechiffrement impossible. Relancez avec --raw pour copier sans dechiffrement.",
     "E8000": "Impossible de se connecter au serveur KEYDB : {detail}",
     "E8001": "Echec du telechargement KEYDB (HTTP {detail})",
     "E8002": "KEYDB vide ou invalide",

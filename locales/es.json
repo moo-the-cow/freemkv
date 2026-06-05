@@ -180,6 +180,7 @@
     "E7002": "Autenticación AACS falló — no se pudo asignar AGID",
     "E7003": "Autenticación AACS falló",
     "E7013": "Descifrado falló",
+    "E7022": "no se encontro clave para el disco {hash} — no se puede descifrar. Vuelva a ejecutar con --raw para copiar sin descifrado.",
     "E8000": "No se puede conectar al servidor KEYDB: {detail}",
     "E8001": "Descarga de KEYDB falló (HTTP {detail})",
     "E8002": "KEYDB está vacío o es inválido",

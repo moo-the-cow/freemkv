@@ -180,6 +180,7 @@
     "E7002": "AACS-handshake mislukt — kon geen AGID toewijzen",
     "E7003": "AACS-handshake mislukt",
     "E7013": "Decodering mislukt",
+    "E7022": "geen sleutel gevonden voor schijf {hash} — kan niet decoderen. Voer opnieuw uit met --raw om zonder decodering te kopieren.",
     "E8000": "Kan geen verbinding maken met KEYDB-server: {detail}",
     "E8001": "KEYDB-download mislukt (HTTP {detail})",
     "E8002": "KEYDB is leeg of ongeldig",

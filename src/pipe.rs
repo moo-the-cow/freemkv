@@ -48,8 +48,17 @@ extern "C" fn handle_sigint(_sig: libc::c_int) {
 }
 
 /// Format an error for display using i18n strings.
+///
+/// libfreemkv errors render as `E<code>: <data>`. The no-key mux abort
+/// (`E7022`, [`libfreemkv::Error::NoDiscKey`]) gets a dedicated message that
+/// names the disc by hash and points at `--raw`; everything else falls through
+/// to the generic wrapper.
 fn fmt_err(e: &dyn std::fmt::Display) -> String {
-    strings::fmt("error.generic", &[("detail", &e.to_string())])
+    let s = e.to_string();
+    if let Some(rest) = s.strip_prefix("E7022:") {
+        return strings::fmt("error.E7022", &[("hash", rest.trim())]);
+    }
+    strings::fmt("error.generic", &[("detail", &s)])
 }
 
 // ── CLI entry point ─────────────────────────────────────────────────────────
