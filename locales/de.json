@@ -53,14 +53,13 @@
     "submit_firmware": "Firmware",
     "submit_profile": "Profil",
     "submit_features": "Funktionen",
-    "submit_confirm": "Einreichen, um die Laufwerk-Unterstuetzung zu erweitern? [y/N] ",
-    "submit_not_sent": "Nicht uebermittelt. Profil gespeichert unter {dir}/",
     "submit_packaging": "Wird verpackt...",
-    "submit_sending": "Wird uebermittelt...",
-    "submit_ok": "Uebermittelt! Vielen Dank fuer Ihren Beitrag zur Laufwerk-Unterstuetzung.",
-    "submit_failed": "Uebermittlung moeglicherweise fehlgeschlagen. Bitte manuell einreichen:",
-    "submit_net_error": "Uebermittlung nicht moeglich ({error}). Bitte manuell einreichen:",
-    "zip_failed": "zip fehlgeschlagen ({error}), nur Text wird uebermittelt"
+    "zip_failed": "zip fehlgeschlagen ({error}), nur Text wird uebermittelt",
+    "submit_saved": "Profil gespeichert unter {dir}/",
+    "submit_zip": "Zip-Archiv: {path}",
+    "submit_manual": "Um dieses Profil beizutragen, öffne ein neues Issue und füge den folgenden Text ein:",
+    "submit_issue_title": "Issue-Titel: {title}",
+    "submit_issue_body": "Issue-Text (alles zwischen den Linien kopieren):"
   },
   "disc": {
     "scanning": "Disc wird gescannt...",
@@ -69,6 +68,8 @@
     "aacs_encrypted": "AACS: Verschluesselt",
     "css_encrypted": "CSS: Verschluesselt",
     "titles": "Titel",
+    "streams": "Streams",
+    "duration": "Dauer",
     "no_titles": "Keine Titel gefunden",
     "more_titles": "+{count} weitere (--full fuer alle anzeigen)",
     "clip": "Clip",
@@ -77,7 +78,8 @@
     "audio": "Audio",
     "subtitle": "Untertitel",
     "forced": "erzwungen",
-    "usage": "Verwendung: freemkv disc-info [--device /dev/sgN] [--full] [--basic] [--quiet]"
+    "usage": "Verwendung: freemkv disc-info [--device /dev/sgN] [--full] [--basic] [--quiet]",
+    "format_unknown": "Unbekannt"
   },
   "stream": {
     "purpose": {
@@ -139,7 +141,8 @@
     "damage_lost": "{time} lost ({movie_time} in movie)",
     "damage_lost_movie": "{time} lost (in movie)",
     "damage_lost_simple": "{time} lost",
-    "damage_none": "0s"
+    "damage_none": "0s",
+    "multipass_ignored": "Hinweis: --multipass wird bei disc->MKV/M2TS ignoriert (Einzeldurchlauf-Mux). Verwende eine iso://-Ausgabe für Mehrpass-Wiederherstellung."
   },
   "remux": {
     "input": "Eingabe",
@@ -162,6 +165,12 @@
     "no_drive": "Kein BD-Laufwerk gefunden. Verwenden Sie --device /dev/sgN",
     "scan_failed": "Scan fehlgeschlagen: {detail}",
     "raw_mux_invalid": "Fehler: --raw kann nicht zum Muxen (mkv/m2ts) verwendet werden — verschluesselte Daten koennen nicht gemuxt werden. Verwenden Sie --raw nur mit einer iso://-Ausgabe (Rohkopie der Disc).",
+    "dest_needs_scheme": "Fehler: '{dest}' hat kein URL-Schema. Verwenden Sie ein scheme://-Praefix (z. B. mkv://{dest} fuer eine einzelne Datei) oder geben Sie ein vorhandenes Verzeichnis fuer mehrere Titel an.",
+    "invalid_title": "Fehler: ungueltiger Titel '{value}' — Titel sind 1-basiert und muessen eine Zahl >= 1 sein.",
+    "flag_needs_value": "Fehler: {flag} benoetigt einen Wert (z. B. {example}).",
+    "unknown_flag": "Fehler: unbekannte Option '{flag}'. Mit 'freemkv help' werden alle Optionen angezeigt.",
+    "multi_title_needs_dir": "Fehler: '{dest}' ist ein Ziel fuer eine einzelne Datei, aber es wurden mehrere Titel ausgewaehlt. Geben Sie ein Verzeichnis an (z. B. einen Pfad, der mit '/' endet), damit jeder Titel seine eigene Datei erhaelt.",
+    "interrupted_incomplete": "Abgebrochen — die Ausgabe ist unvollstaendig und wurde nicht abgeschlossen.",
     "E1000": "Geraet nicht gefunden: {detail}",
     "E1001": "Zugriff verweigert: {detail}. Versuchen Sie: sudo chmod 666 /dev/sgN",
     "E1002": "Laufwerk nicht bereit: {detail}",
@@ -193,6 +202,9 @@
     "E9002": "Ungueltige Stream-URL: {detail}",
     "E9003": "URL ohne Pfad: {detail}",
     "E9004": "URL ohne Port: {detail}",
-    "E9007": "ISO-Abbild zu gross: {detail}"
+    "E9007": "ISO-Abbild zu gross: {detail}",
+    "title_out_of_range": "Titel {num} außerhalb des Bereichs ({count})",
+    "cannot_create_dir": "Verzeichnis {path} kann nicht erstellt werden: {error}",
+    "cannot_write": "{path} kann nicht geschrieben werden: {error}"
   }
 }

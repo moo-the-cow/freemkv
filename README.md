@@ -42,10 +42,6 @@ freemkv update-keys --url <keydb-url>
 
 Once present, it's used automatically.
 
-#### Operator-supplied keys
-
-If you have additional device keys, processing keys, or VUKs you derived yourself, drop them in `~/.config/freemkv/local_keys.cfg`. Same format as `keydb.cfg`. The file is additive — its entries are merged on top of the built-in keys and any main `keydb.cfg`.
-
 ### 3. Rip
 
 ```bash

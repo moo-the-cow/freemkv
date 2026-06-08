@@ -53,14 +53,13 @@
     "submit_firmware": "Firmware",
     "submit_profile": "Profile",
     "submit_features": "Features",
-    "submit_confirm": "Submit to help expand drive support? [y/N] ",
-    "submit_not_sent": "Not submitted. Profile saved to {dir}/",
     "submit_packaging": "Packaging...",
-    "submit_sending": "Submitting...",
-    "submit_ok": "Submitted! Thank you for helping expand drive support.",
-    "submit_failed": "Submission may have failed. Please submit manually:",
-    "submit_net_error": "Could not submit ({error}). Please submit manually:",
-    "zip_failed": "zip failed ({error}), submitting text only"
+    "zip_failed": "zip failed ({error}), submitting text only",
+    "submit_saved": "Profile saved to {dir}/",
+    "submit_zip": "Zip archive: {path}",
+    "submit_manual": "To contribute this profile, open a new issue and paste the text below:",
+    "submit_issue_title": "Issue title: {title}",
+    "submit_issue_body": "Issue body (copy everything between the lines):"
   },
   "disc": {
     "scanning": "Scanning disc...",
@@ -69,6 +68,8 @@
     "aacs_encrypted": "AACS: Encrypted",
     "css_encrypted": "CSS: Encrypted",
     "titles": "Titles",
+    "streams": "Streams",
+    "duration": "Duration",
     "no_titles": "No titles found",
     "more_titles": "+{count} more (use --full to show all)",
     "clip": "clip",
@@ -77,7 +78,8 @@
     "audio": "Audio",
     "subtitle": "Subtitle",
     "forced": "forced",
-    "usage": "Usage: freemkv disc-info [--device /dev/sgN] [--full] [--basic] [--quiet]"
+    "usage": "Usage: freemkv disc-info [--device /dev/sgN] [--full] [--basic] [--quiet]",
+    "format_unknown": "Unknown"
   },
   "stream": {
     "purpose": {
@@ -139,7 +141,8 @@
     "mapfile_summary": "Mapfile: {good} GB good, {unreadable} MB unreadable, {pending} MB pending",
     "nothing_to_patch": "Nothing to patch — all sectors are good",
     "patch_start": "Patching: {good} GB good, {unreadable} MB unreadable, {pending} MB pending",
-    "patch_done": "Patch done: recovered {recovered} MB, {unreadable} MB unreadable, {pending} MB pending ({time}s, {speed} MB/s)"
+    "patch_done": "Patch done: recovered {recovered} MB, {unreadable} MB unreadable, {pending} MB pending ({time}s, {speed} MB/s)",
+    "multipass_ignored": "Note: --multipass is ignored for disc->MKV/M2TS (single-pass mux). Use an iso:// output for multipass recovery."
   },
   "remux": {
     "input": "Input",
@@ -162,6 +165,12 @@
     "no_drive": "No BD drive found. Use --device /dev/sgN",
     "scan_failed": "Scan failed: {detail}",
     "raw_mux_invalid": "Error: --raw cannot be used for muxing (mkv/m2ts) — encrypted data cannot be muxed. Use --raw only with an iso:// output (raw disc copy).",
+    "dest_needs_scheme": "Error: '{dest}' has no URL scheme. Use a scheme:// prefix (e.g. mkv://{dest} for a single file), or pass an existing directory for multiple titles.",
+    "invalid_title": "Error: invalid title '{value}' — titles are 1-based, must be a number >= 1.",
+    "flag_needs_value": "Error: {flag} requires a value (e.g. {example}).",
+    "unknown_flag": "Error: unknown flag '{flag}'. Try 'freemkv help' for a list of options.",
+    "multi_title_needs_dir": "Error: '{dest}' is a single-file destination, but multiple titles were selected. Pass a directory (e.g. a path ending in '/') so each title gets its own file.",
+    "interrupted_incomplete": "Interrupted — output is incomplete and was not finalized.",
     "E1000": "Device not found: {detail}",
     "E1001": "Permission denied: {detail}. Try: sudo chmod 666 /dev/sgN",
     "E1002": "Drive not ready: {detail}",
@@ -193,6 +202,9 @@
     "E9002": "Invalid stream URL: {detail}",
     "E9003": "URL missing path: {detail}",
     "E9004": "URL missing port: {detail}",
-    "E9007": "ISO image too large: {detail}"
+    "E9007": "ISO image too large: {detail}",
+    "title_out_of_range": "Title {num} out of range ({count})",
+    "cannot_create_dir": "Cannot create directory {path}: {error}",
+    "cannot_write": "Cannot write {path}: {error}"
   }
 }

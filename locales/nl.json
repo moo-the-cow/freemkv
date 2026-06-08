@@ -53,14 +53,13 @@
     "submit_firmware": "Firmware",
     "submit_profile": "Profiel",
     "submit_features": "Kenmerken",
-    "submit_confirm": "Insturen om drive-ondersteuning uit te breiden? [y/N] ",
-    "submit_not_sent": "Niet verstuurd. Profiel opgeslagen in {dir}/",
     "submit_packaging": "Inpakken...",
-    "submit_sending": "Versturen...",
-    "submit_ok": "Verstuurd! Bedankt voor het helpen uitbreiden van drive-ondersteuning.",
-    "submit_failed": "Versturen is mogelijk mislukt. Stuur het handmatig in:",
-    "submit_net_error": "Kon niet versturen ({error}). Stuur het handmatig in:",
-    "zip_failed": "zip mislukt ({error}), alleen tekst wordt verstuurd"
+    "zip_failed": "zip mislukt ({error}), alleen tekst wordt verstuurd",
+    "submit_saved": "Profiel opgeslagen in {dir}/",
+    "submit_zip": "Zip-archief: {path}",
+    "submit_manual": "Open een nieuwe issue en plak de onderstaande tekst om dit profiel bij te dragen:",
+    "submit_issue_title": "Issue-titel: {title}",
+    "submit_issue_body": "Issue-tekst (kopieer alles tussen de lijnen):"
   },
   "disc": {
     "scanning": "Disc scannen...",
@@ -69,6 +68,8 @@
     "aacs_encrypted": "AACS: Versleuteld",
     "css_encrypted": "CSS: Versleuteld",
     "titles": "Titels",
+    "streams": "Streams",
+    "duration": "Duur",
     "no_titles": "Geen titels gevonden",
     "more_titles": "+{count} meer (gebruik --full om alles te tonen)",
     "clip": "clip",
@@ -77,7 +78,8 @@
     "audio": "Audio",
     "subtitle": "Ondertitel",
     "forced": "geforceerd",
-    "usage": "Gebruik: freemkv disc-info [--device /dev/sgN] [--full] [--basic] [--quiet]"
+    "usage": "Gebruik: freemkv disc-info [--device /dev/sgN] [--full] [--basic] [--quiet]",
+    "format_unknown": "Onbekend"
   },
   "stream": {
     "purpose": {
@@ -139,7 +141,8 @@
     "damage_lost": "{time} lost ({movie_time} in movie)",
     "damage_lost_movie": "{time} lost (in movie)",
     "damage_lost_simple": "{time} lost",
-    "damage_none": "0s"
+    "damage_none": "0s",
+    "multipass_ignored": "Let op: --multipass wordt genegeerd voor disc->MKV/M2TS (mux in één doorgang). Gebruik een iso://-uitvoer voor multipass-herstel."
   },
   "remux": {
     "input": "Invoer",
@@ -162,6 +165,12 @@
     "no_drive": "Geen BD-drive gevonden. Gebruik --device /dev/sgN",
     "scan_failed": "Scannen mislukt: {detail}",
     "raw_mux_invalid": "Fout: --raw kan niet worden gebruikt voor muxen (mkv/m2ts) — versleutelde data kan niet worden gemuxt. Gebruik --raw alleen met een iso://-uitvoer (ruwe schijfkopie).",
+    "dest_needs_scheme": "Fout: '{dest}' heeft geen URL-schema. Gebruik een scheme://-prefix (bijv. mkv://{dest} voor een enkel bestand), of geef een bestaande map op voor meerdere titels.",
+    "invalid_title": "Fout: ongeldige titel '{value}' — titels beginnen bij 1, moet een getal >= 1 zijn.",
+    "flag_needs_value": "Fout: {flag} vereist een waarde (bijv. {example}).",
+    "unknown_flag": "Fout: onbekende optie '{flag}'. Gebruik 'freemkv help' voor een lijst met opties.",
+    "multi_title_needs_dir": "Fout: '{dest}' is een bestemming voor een enkel bestand, maar er zijn meerdere titels geselecteerd. Geef een map op (bijv. een pad dat eindigt op '/') zodat elke titel zijn eigen bestand krijgt.",
+    "interrupted_incomplete": "Onderbroken — de uitvoer is onvolledig en is niet afgerond.",
     "E1000": "Apparaat niet gevonden: {detail}",
     "E1001": "Toegang geweigerd: {detail}. Probeer: sudo chmod 666 /dev/sgN",
     "E1002": "Drive niet gereed: {detail}",
@@ -193,6 +202,9 @@
     "E9002": "Ongeldige stream-URL: {detail}",
     "E9003": "URL mist pad: {detail}",
     "E9004": "URL mist poort: {detail}",
-    "E9007": "ISO-image te groot: {detail}"
+    "E9007": "ISO-image te groot: {detail}",
+    "title_out_of_range": "Titel {num} buiten bereik ({count})",
+    "cannot_create_dir": "Kan map {path} niet aanmaken: {error}",
+    "cannot_write": "Kan {path} niet schrijven: {error}"
   }
 }

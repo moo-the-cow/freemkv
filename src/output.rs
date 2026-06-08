@@ -7,21 +7,39 @@
 use crate::strings;
 use std::io::Write;
 
+/// Verbosity level attached to each line of output.
+///
+/// A line prints when the configured [`Output`] level is greater than or equal
+/// to the line's level, so the variants are ordered from lowest to highest. A
+/// line tagged with a level prints at that verbosity and every higher one.
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub enum Level {
-    Quiet,
+    /// Always shown — prints at every verbosity, including quiet. Suppresses
+    /// nothing. Use for results and errors the user must always see.
+    Always,
+    /// Normal output — shown at normal and verbose, suppressed when quiet.
     Normal,
+    /// Verbose output — shown only when verbose; suppressed at normal and quiet.
     Verbose,
 }
 
+/// Single filter point for all CLI output.
+///
+/// Holds the configured verbosity; each `print`/`raw`/`blank` call passes the
+/// [`Level`] of that line and is emitted only when the configured level is high
+/// enough.
 pub struct Output {
     level: Level,
 }
 
 impl Output {
+    /// Build an `Output` from the `--verbose` and `--quiet` flags.
+    ///
+    /// Quiet wins over verbose when both flags are set: the result is the quiet
+    /// level (only [`Level::Always`] lines print).
     pub fn new(verbose: bool, quiet: bool) -> Self {
         let level = if quiet {
-            Level::Quiet
+            Level::Always
         } else if verbose {
             Level::Verbose
         } else {
@@ -34,13 +52,6 @@ impl Output {
     pub fn print(&self, level: Level, key: &str) {
         if self.level >= level {
             println!("{}", strings::get(key));
-        }
-    }
-
-    /// Print a formatted string from the locale file with {key} placeholders.
-    pub fn fmt(&self, level: Level, key: &str, args: &[(&str, &str)]) {
-        if self.level >= level {
-            println!("{}", strings::fmt(key, args));
         }
     }
 
@@ -60,7 +71,7 @@ impl Output {
     }
 
     pub fn is_quiet(&self) -> bool {
-        self.level == Level::Quiet
+        self.level == Level::Always
     }
 
     /// Print a blank line.

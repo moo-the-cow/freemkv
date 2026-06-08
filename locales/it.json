@@ -53,14 +53,13 @@
     "submit_firmware": "Firmware",
     "submit_profile": "Profilo",
     "submit_features": "Funzionalita'",
-    "submit_confirm": "Inviare per contribuire al supporto dei lettori? [y/N] ",
-    "submit_not_sent": "Non inviato. Profilo salvato in {dir}/",
     "submit_packaging": "Preparazione...",
-    "submit_sending": "Invio in corso...",
-    "submit_ok": "Inviato! Grazie per aver contribuito al supporto dei lettori.",
-    "submit_failed": "L'invio potrebbe non essere riuscito. Invia manualmente:",
-    "submit_net_error": "Impossibile inviare ({error}). Invia manualmente:",
-    "zip_failed": "zip fallito ({error}), invio solo testo"
+    "zip_failed": "zip fallito ({error}), invio solo testo",
+    "submit_saved": "Profilo salvato in {dir}/",
+    "submit_zip": "Archivio zip: {path}",
+    "submit_manual": "Per contribuire questo profilo, apri una nuova issue e incolla il testo seguente:",
+    "submit_issue_title": "Titolo della issue: {title}",
+    "submit_issue_body": "Corpo della issue (copia tutto ciò che è tra le righe):"
   },
   "disc": {
     "scanning": "Scansione del disco...",
@@ -69,6 +68,8 @@
     "aacs_encrypted": "AACS: Crittografato",
     "css_encrypted": "CSS: Crittografato",
     "titles": "Titoli",
+    "streams": "Flussi",
+    "duration": "Durata",
     "no_titles": "Nessun titolo trovato",
     "more_titles": "+{count} altri (usa --full per mostrarli tutti)",
     "clip": "clip",
@@ -77,7 +78,8 @@
     "audio": "Audio",
     "subtitle": "Sottotitoli",
     "forced": "forzato",
-    "usage": "Uso: freemkv disc-info [--device /dev/sgN] [--full] [--basic] [--quiet]"
+    "usage": "Uso: freemkv disc-info [--device /dev/sgN] [--full] [--basic] [--quiet]",
+    "format_unknown": "Sconosciuto"
   },
   "stream": {
     "purpose": {
@@ -139,7 +141,8 @@
     "damage_lost": "{time} lost ({movie_time} in movie)",
     "damage_lost_movie": "{time} lost (in movie)",
     "damage_lost_simple": "{time} lost",
-    "damage_none": "0s"
+    "damage_none": "0s",
+    "multipass_ignored": "Nota: --multipass viene ignorato per disc->MKV/M2TS (mux a passaggio singolo). Usa un'uscita iso:// per il recupero multipassaggio."
   },
   "remux": {
     "input": "Input",
@@ -162,6 +165,12 @@
     "no_drive": "Nessun lettore BD trovato. Usa --device /dev/sgN",
     "scan_failed": "Scansione fallita: {detail}",
     "raw_mux_invalid": "Errore: --raw non puo essere usato per il muxing (mkv/m2ts) — i dati cifrati non possono essere muxati. Usa --raw solo con un output iso:// (copia grezza del disco).",
+    "dest_needs_scheme": "Errore: '{dest}' non ha uno schema URL. Usa un prefisso scheme:// (es. mkv://{dest} per un singolo file), oppure indica una cartella esistente per piu titoli.",
+    "invalid_title": "Errore: titolo non valido '{value}' — i titoli partono da 1, deve essere un numero >= 1.",
+    "flag_needs_value": "Errore: {flag} richiede un valore (es. {example}).",
+    "unknown_flag": "Errore: opzione sconosciuta '{flag}'. Usa 'freemkv help' per l'elenco delle opzioni.",
+    "multi_title_needs_dir": "Errore: '{dest}' e una destinazione a file singolo, ma sono stati selezionati piu titoli. Indica una cartella (es. un percorso che termina con '/') cosi ogni titolo avra il proprio file.",
+    "interrupted_incomplete": "Interrotto — l'output e incompleto e non e stato finalizzato.",
     "E1000": "Dispositivo non trovato: {detail}",
     "E1001": "Permesso negato: {detail}. Prova: sudo chmod 666 /dev/sgN",
     "E1002": "Lettore non pronto: {detail}",
@@ -193,6 +202,9 @@
     "E9002": "URL del flusso non valido: {detail}",
     "E9003": "Percorso mancante nell'URL: {detail}",
     "E9004": "Porta mancante nell'URL: {detail}",
-    "E9007": "Immagine ISO troppo grande: {detail}"
+    "E9007": "Immagine ISO troppo grande: {detail}",
+    "title_out_of_range": "Titolo {num} fuori intervallo ({count})",
+    "cannot_create_dir": "Impossibile creare la directory {path}: {error}",
+    "cannot_write": "Impossibile scrivere {path}: {error}"
   }
 }

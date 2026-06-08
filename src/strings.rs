@@ -6,13 +6,14 @@
 //
 // Language priority:
 //   1. --language flag (set via set_language() before init())
-//   2. LANG / LC_MESSAGES env var
+//   2. LC_ALL / LC_MESSAGES / LANG env var (POSIX precedence)
 //   3. English fallback
 //
 // Search paths for locale files:
-//   1. ./locales/xx.json (next to binary)
-//   2. ~/.config/freemkv/locales/xx.json
-//   3. /usr/share/freemkv/locales/xx.json
+//   1. <binary dir>/locales/xx.json (next to the binary)
+//   2. ./locales/xx.json (working directory)
+//   3. ~/.config/freemkv/locales/xx.json
+//   4. /usr/share/freemkv/locales/xx.json
 //
 // To add a language: create locales/xx.json (copy en.json structure) and
 // place it in any search path. No code changes needed.
@@ -27,7 +28,19 @@ static LANG_OVERRIDE: OnceLock<String> = OnceLock::new();
 include!(concat!(env!("OUT_DIR"), "/locales_generated.rs"));
 
 /// Set language override from --language flag. Call before init().
+///
+/// Once `init()`/`get()` has locked in the active locale (`STRINGS`), this
+/// override is dead: the language is already chosen. A call at that point is a
+/// caller-ordering bug, so make it visible instead of silently no-opping.
 pub fn set_language(lang: &str) {
+    if STRINGS.get().is_some() {
+        debug_assert!(
+            false,
+            "set_language(\"{lang}\") called after strings were initialized; the override is ignored"
+        );
+        eprintln!("warning: --language ignored (set after locale was initialized)");
+        return;
+    }
     let _ = LANG_OVERRIDE.set(lang.to_string());
 }
 
@@ -70,7 +83,9 @@ fn detect_language() -> String {
     if let Some(lang) = LANG_OVERRIDE.get() {
         return normalize_code(lang);
     }
-    for var in &["LC_MESSAGES", "LC_ALL", "LANG"] {
+    // POSIX precedence: LC_ALL overrides every other locale variable, then
+    // the category-specific LC_MESSAGES, then LANG as the fallback default.
+    for var in &["LC_ALL", "LC_MESSAGES", "LANG"] {
         if let Ok(val) = std::env::var(var) {
             if !val.is_empty() && val != "C" && val != "POSIX" {
                 return normalize_code(&val);
@@ -121,14 +136,38 @@ fn load_locale_file(code: &str) -> Option<Value> {
 
 fn try_load(path: &std::path::Path) -> Option<Value> {
     let data = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&data).ok()
+    // A missing file is fine (the loader tries the next search path), but a
+    // file that exists yet fails to parse is almost certainly an operator
+    // mistake — surface it instead of silently falling back to English.
+    match serde_json::from_str(&data) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            eprintln!(
+                "freemkv: ignoring invalid locale file {}: {}",
+                path.display(),
+                e
+            );
+            None
+        }
+    }
 }
 
-/// "fr_FR.UTF-8" → "fr"
+/// "fr_FR.UTF-8" → "fr". Inputs are untrusted (the `--language` CLI flag and
+/// the `LC_*`/`LANG` env vars), so this must never panic. The two-letter code is
+/// taken by *character*, not byte, and validated as ASCII letters — anything
+/// else (multibyte leading chars, digits, punctuation) falls back to English.
 fn normalize_code(s: &str) -> String {
-    let s = s.trim().to_lowercase();
-    if s.len() >= 2 {
-        s[..2].to_string()
+    // Strip any territory/codeset/modifier suffix (`fr_FR.UTF-8@euro` → `fr`)
+    // before taking the language part.
+    let lang = s
+        .trim()
+        .split(['_', '.', '-', '@', ':'])
+        .next()
+        .unwrap_or("")
+        .to_lowercase();
+    let code: String = lang.chars().take(2).collect();
+    if code.chars().count() == 2 && code.chars().all(|c| c.is_ascii_alphabetic()) {
+        code
     } else {
         "en".to_string()
     }
@@ -200,21 +239,83 @@ mod tests {
         for key in &en_keys {
             let en_val = lookup(&en, key);
             let locale_val = lookup(&locale, key);
-            // Find all {word} patterns in English
-            for cap in en_val.match_indices('{') {
-                if let Some(end) = en_val[cap.0..].find('}') {
-                    let placeholder = &en_val[cap.0..cap.0 + end + 1];
-                    assert!(
-                        locale_val.contains(placeholder),
-                        "{}.json key '{}': missing placeholder {} (got: '{}')",
-                        code,
-                        key,
-                        placeholder,
-                        locale_val
-                    );
-                }
+            for placeholder in placeholders(&en_val) {
+                assert!(
+                    locale_val.contains(&placeholder),
+                    "{}.json key '{}': missing placeholder {} (got: '{}')",
+                    code,
+                    key,
+                    placeholder,
+                    locale_val
+                );
             }
         }
+    }
+
+    /// Extract `{word}` placeholders from a format string, matching exactly how
+    /// `fmt` substitutes them: a balanced single `{...}` with no nested braces.
+    /// Escaped/doubled braces (`{{`, `}}`) are skipped so a literal `{{val}}`
+    /// does not register a malformed `{{val}` placeholder.
+    fn placeholders(s: &str) -> Vec<String> {
+        let bytes = s.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'{' {
+                // Doubled `{{` is an escape, not a placeholder — skip both.
+                if bytes.get(i + 1) == Some(&b'{') {
+                    i += 2;
+                    continue;
+                }
+                if let Some(rel_end) = s[i + 1..].find('}') {
+                    let inner = &s[i + 1..i + 1 + rel_end];
+                    // A real placeholder has no nested brace inside it.
+                    if !inner.contains('{') {
+                        out.push(format!("{{{}}}", inner));
+                    }
+                    i += 1 + rel_end + 1;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+        out
+    }
+
+    #[test]
+    fn normalize_code_does_not_panic_on_multibyte() {
+        // Regression: byte-slicing `s[..2]` panicked on a leading multibyte
+        // char (e.g. `--language あ`, `LC_ALL=€a`). Untrusted input must never
+        // panic — it must fall back to English (or the ASCII language part).
+        for input in ["あx", "€a", "Ⓐb", "😀x", "あ", "", ".", "_", "@", "ñ"] {
+            let code = normalize_code(input);
+            assert!(
+                code == "en" || (code.len() == 2 && code.chars().all(|c| c.is_ascii_alphabetic())),
+                "normalize_code({input:?}) = {code:?}: must be 'en' or a 2-letter ASCII code"
+            );
+        }
+    }
+
+    #[test]
+    fn normalize_code_extracts_language_part() {
+        assert_eq!(normalize_code("fr_FR.UTF-8"), "fr");
+        assert_eq!(normalize_code("de"), "de");
+        assert_eq!(normalize_code("PT_BR"), "pt");
+        assert_eq!(normalize_code("en-US"), "en");
+        assert_eq!(normalize_code("es.UTF-8@modifier"), "es");
+        // Non-letters fall back rather than producing a bogus code.
+        assert_eq!(normalize_code("12"), "en");
+        assert_eq!(normalize_code("x"), "en");
+    }
+
+    #[test]
+    fn placeholders_skips_doubled_braces() {
+        assert_eq!(placeholders("hi {name}!"), vec!["{name}".to_string()]);
+        assert_eq!(placeholders("a {x} b {y}"), vec!["{x}", "{y}"]);
+        // Doubled braces are escapes, not placeholders.
+        assert!(placeholders("{{val}}").is_empty());
+        assert_eq!(placeholders("{{lit}} {real}"), vec!["{real}".to_string()]);
+        assert!(placeholders("no placeholders").is_empty());
     }
 
     #[test]

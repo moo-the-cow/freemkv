@@ -21,8 +21,12 @@ fn combined_output(out: &std::process::Output) -> String {
 
 #[test]
 fn no_args_shows_usage() {
+    // Bare invocation prints usage but exits non-zero (2) so a scripted
+    // `freemkv; echo $?` sees a failure rather than a false success. Explicit
+    // `help`/`--help` is the success path (see `help_shows_usage`).
     let out = freemkv().output().expect("failed to run");
-    assert!(out.status.success());
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("freemkv"));
 }
@@ -45,6 +49,8 @@ fn version_shows_version() {
 
 #[test]
 fn no_scheme_url_errors() {
+    // A schemeless destination is caught up front with clear guidance to add a
+    // scheme — never silently turned into a `.unknown` file / `unknown://` URL.
     let out = freemkv()
         .args(["/dev/sr0", "output.mkv"])
         .output()
@@ -52,8 +58,28 @@ fn no_scheme_url_errors() {
     assert!(!out.status.success());
     let combined = combined_output(&out);
     assert!(
-        combined.contains("E9002"),
-        "expected E9002, got: {combined}"
+        combined.contains("no URL scheme"),
+        "expected schemeless-dest guidance, got: {combined}"
+    );
+}
+
+#[test]
+fn schemeless_dest_with_valid_source_errors() {
+    // A valid scheme source but schemeless dest must error clearly, not produce
+    // a `name_t1.unknown` file or an `unknown://` URL.
+    let out = freemkv()
+        .args(["iso:///nonexistent.iso", "/path/out.mkv"])
+        .output()
+        .expect("failed to run");
+    assert!(!out.status.success());
+    let combined = combined_output(&out);
+    assert!(
+        combined.contains("no URL scheme"),
+        "expected schemeless-dest guidance, got: {combined}"
+    );
+    assert!(
+        !combined.contains("unknown://") && !combined.contains(".unknown"),
+        "must not emit unknown scheme/extension, got: {combined}"
     );
 }
 

@@ -21,7 +21,19 @@ pub fn run(args: &[String]) {
         match args[i].as_str() {
             "--device" | "-d" => {
                 i += 1;
-                device_path = args.get(i).cloned();
+                match args.get(i) {
+                    Some(v) => device_path = Some(v.clone()),
+                    None => {
+                        eprintln!(
+                            "{}",
+                            strings::fmt(
+                                "error.flag_needs_value",
+                                &[("flag", "--device"), ("example", "--device /dev/sg0")]
+                            )
+                        );
+                        std::process::exit(1);
+                    }
+                }
             }
             "--share" | "-s" => share = true,
             "--mask" | "-m" => mask = true,
@@ -33,6 +45,8 @@ pub fn run(args: &[String]) {
                 println!("  --share    {}", strings::get("drive.share_desc"));
                 println!("  --mask     {}", strings::get("drive.mask_desc"));
                 println!("  --device   {}", strings::get("drive.device_desc"));
+                println!("  --quiet    {}", strings::get("app.opt_quiet"));
+                println!("  --verbose  {}", strings::get("app.opt_verbose"));
                 return;
             }
             _ => {
@@ -175,18 +189,32 @@ pub fn run(args: &[String]) {
         }
     };
 
-    let profile_name = format!(
+    // Build the profile dir name from the (untrusted) INQUIRY strings. These
+    // come from drive firmware and could contain `/`, `\`, `..`, NUL, etc., so
+    // sanitize to a strict allowlist before using the result as a path — a
+    // malformed/malicious firmware string must not steer writes out of CWD.
+    let profile_name = sanitize_component(&format!(
         "{}-{}-{}-{}",
         id.vendor_id.to_lowercase().trim(),
-        id.product_id.to_lowercase().trim().replace(' ', "-"),
+        id.product_id.to_lowercase().trim(),
         id.product_revision.to_lowercase().trim(),
         id.vendor_specific.to_lowercase().trim()
-    )
-    .replace('/', "-")
-    .replace("--", "-");
+    ));
 
     let profile_dir = std::path::PathBuf::from(&profile_name);
-    std::fs::create_dir_all(&profile_dir).expect("Cannot create profile directory");
+    if let Err(e) = std::fs::create_dir_all(&profile_dir) {
+        eprintln!(
+            "{}",
+            strings::fmt(
+                "error.cannot_create_dir",
+                &[
+                    ("path", &profile_dir.display().to_string()),
+                    ("error", &e.to_string())
+                ]
+            )
+        );
+        std::process::exit(1);
+    }
 
     // Save raw INQUIRY
     save_bin(&profile_dir, "inquiry.bin", &capture.inquiry);
@@ -263,15 +291,28 @@ pub fn run(args: &[String]) {
         id.product_revision.trim()
     ));
     toml.push_str("[drive]\n");
-    toml.push_str(&format!("manufacturer = \"{}\"\n", id.vendor_id.trim()));
-    toml.push_str(&format!("product = \"{}\"\n", id.product_id.trim()));
-    toml.push_str(&format!("revision = \"{}\"\n", id.product_revision.trim()));
-    toml.push_str(&format!("serial = \"{}\"\n", serial_toml));
+    // These fields are derived from raw INQUIRY / GET_CONFIG bytes (firmware-
+    // controlled, `from_utf8_lossy`/`ascii_field`), so a value may contain a
+    // double quote, backslash, or control char that would break the TOML
+    // double-quoted string. Escape every embedded value.
+    toml.push_str(&format!(
+        "manufacturer = \"{}\"\n",
+        toml_escape(id.vendor_id.trim())
+    ));
+    toml.push_str(&format!(
+        "product = \"{}\"\n",
+        toml_escape(id.product_id.trim())
+    ));
+    toml.push_str(&format!(
+        "revision = \"{}\"\n",
+        toml_escape(id.product_revision.trim())
+    ));
+    toml.push_str(&format!("serial = \"{}\"\n", toml_escape(&serial_toml)));
     toml.push_str(&format!(
         "firmware_date = \"{}\"\n",
-        format_date(&id.firmware_date)
+        toml_escape(&format_date(&id.firmware_date))
     ));
-    toml.push_str(&format!("platform = \"{}\"\n", platform));
+    toml.push_str(&format!("platform = \"{}\"\n", toml_escape(&platform)));
     toml.push_str(&format!("profile_matched = {}\n\n", session.has_profile()));
     toml.push_str("[files]\n");
     toml.push_str("inquiry = \"inquiry.bin\"\n");
@@ -290,9 +331,13 @@ pub fn run(args: &[String]) {
             toml.push_str("mode6 = \"rb_mode6.bin\"\n");
         }
     }
-    std::fs::write(profile_dir.join("drive.toml"), &toml).expect("Cannot write drive.toml");
+    let toml_path = profile_dir.join("drive.toml");
+    if let Err(e) = std::fs::write(&toml_path, &toml) {
+        eprintln!("Cannot write {}: {}", toml_path.display(), e);
+        std::process::exit(1);
+    }
 
-    // ── Confirm + submit ───────────────────────────────────────────────────
+    // ── Summarize captured profile ─────────────────────────────────────────
 
     println!();
     println!("{}:", strings::get("drive.submit_header"));
@@ -326,35 +371,41 @@ pub fn run(args: &[String]) {
     );
     println!();
 
-    eprint!("{}", strings::get("drive.submit_confirm"));
-    let _ = std::io::stderr().flush();
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input).unwrap_or(0);
-    if !input.trim().eq_ignore_ascii_case("y") {
-        println!(
-            "{}",
-            strings::fmt("drive.submit_not_sent", &[("dir", &profile_name)])
-        );
-        return;
-    }
+    // ── Package + present for manual submission ────────────────────────────
+    //
+    // We zip the captured profile to disk and print a ready-to-paste GitHub
+    // issue (title + body + the issues/new URL); the user submits it manually.
+    // A genuine I/O failure (zip or write) exits non-zero so scripts can detect
+    // it.
 
-    // Zip profile directory
     print!("  {}  ", strings::get("drive.submit_packaging"));
     let _ = std::io::stdout().flush();
-    let zip_b64 = match zip_directory(&profile_dir) {
-        Ok(zip_data) => {
-            let encoded = base64_encode(&zip_data);
-            println!("{} bytes", zip_data.len());
-            Some(encoded)
-        }
+    let zip_data = match zip_directory(&profile_dir) {
+        Ok(d) => d,
         Err(e) => {
             println!(
                 "{}",
                 strings::fmt("drive.zip_failed", &[("error", &e.to_string())])
             );
-            None
+            std::process::exit(1);
         }
     };
+    let zip_path = profile_dir.join("profile.zip");
+    if let Err(e) = std::fs::write(&zip_path, &zip_data) {
+        eprintln!(
+            "{}",
+            strings::fmt(
+                "error.cannot_write",
+                &[
+                    ("path", &zip_path.display().to_string()),
+                    ("error", &e.to_string())
+                ]
+            )
+        );
+        std::process::exit(1);
+    }
+    let zip_b64 = base64_encode(&zip_data);
+    println!("{} bytes", zip_data.len());
 
     // Build issue body
     let mut body = String::new();
@@ -404,18 +455,19 @@ pub fn run(args: &[String]) {
     }
     body.push_str("```\n\n");
 
-    if let Some(ref b64) = zip_b64 {
-        body.push_str("<details><summary>Profile data (base64 zip)</summary>\n\n");
-        body.push_str("```\n");
-        for chunk in b64.as_bytes().chunks(76) {
-            body.push_str(std::str::from_utf8(chunk).unwrap_or(""));
-            body.push('\n');
-        }
-        body.push_str("```\n\n");
-        body.push_str("</details>\n\n");
+    body.push_str("<details><summary>Profile data (base64 zip)</summary>\n\n");
+    body.push_str("```\n");
+    for chunk in zip_b64.as_bytes().chunks(76) {
+        // base64 output is pure ASCII, so a 76-byte chunk is always valid UTF-8
+        // on a char boundary; surface the impossible case loudly rather than
+        // silently dropping a line of profile data.
+        body.push_str(std::str::from_utf8(chunk).expect("base64 is ASCII"));
+        body.push('\n');
     }
+    body.push_str("```\n\n");
+    body.push_str("</details>\n\n");
 
-    body.push_str("---\n*Submitted by `freemkv drive-info --share`*\n");
+    body.push_str("---\n*Captured by `freemkv drive-info --share`*\n");
 
     let title = format!(
         "Drive profile: {} {}",
@@ -423,56 +475,43 @@ pub fn run(args: &[String]) {
         id.product_id.trim()
     );
 
-    submit_issue(&title, &body);
+    present_for_submission(&profile_name, &zip_path, &title, &body);
 
-    // Clean up temp profile dir
-    let _ = std::fs::remove_dir_all(&profile_dir);
+    // The captured profile (and its zip) are kept on disk so the user can
+    // attach/paste them when filing the issue. Do NOT remove the dir.
 }
 
-fn submit_issue(title: &str, body: &str) {
-    // Bot token: issues-only, scoped to freemkv/freemkv.
-    const BOT_TOKEN_B64: &str = "Z2l0aHViX3BhdF8xMUFBSUpERlkweHJyd3NBaXI1SUhwXzBMcVowWERYejhxdVR6QUQyUllQSEFHYnN0OTlzc0gzaXJnWDJFWXB3aldZUEZNUzdFN0FIQ2ZqcEpx";
-    let bot_token = String::from_utf8(base64_decode(BOT_TOKEN_B64)).unwrap_or_default();
-
-    let payload = serde_json::json!({
-        "title": title,
-        "body": body,
-        "labels": ["drive-profile"]
-    });
-
-    print!("  {}  ", strings::get("drive.submit_sending"));
-    let _ = std::io::stdout().flush();
-
-    match ureq::post("https://api.github.com/repos/freemkv/freemkv/issues")
-        .set("Authorization", &format!("token {}", bot_token))
-        .set("Accept", "application/vnd.github.v3+json")
-        .set("User-Agent", "freemkv")
-        .send_json(&payload)
-    {
-        Ok(resp) => {
-            if let Ok(json) = resp.into_json::<serde_json::Value>() as Result<serde_json::Value, _>
-            {
-                if let Some(url) = json["html_url"].as_str() {
-                    println!("{}", strings::get("rip.ok"));
-                    println!();
-                    println!("{}", strings::get("drive.submit_ok"));
-                    println!("{}", url);
-                    return;
-                }
-            }
-            println!("{}", strings::get("rip.failed"));
-            eprintln!("{}", strings::get("drive.submit_failed"));
-            eprintln!("  https://github.com/freemkv/freemkv/issues/new");
-        }
-        Err(e) => {
-            println!("{}", strings::get("rip.failed"));
-            eprintln!(
-                "{}",
-                strings::fmt("drive.submit_net_error", &[("error", &e.to_string())])
-            );
-            eprintln!("  https://github.com/freemkv/freemkv/issues/new");
-        }
-    }
+/// Print everything the user needs to file the drive-profile issue by hand.
+///
+/// We print the issue title, the pre-filled new-issue URL, and the full issue
+/// body, and point at the saved zip. The user pastes it into the issue. This
+/// always exits cleanly — the artifact is on disk.
+fn present_for_submission(profile_name: &str, zip_path: &Path, title: &str, body: &str) {
+    println!();
+    println!(
+        "{}",
+        strings::fmt("drive.submit_saved", &[("dir", profile_name)])
+    );
+    println!(
+        "{}",
+        strings::fmt(
+            "drive.submit_zip",
+            &[("path", &zip_path.display().to_string())]
+        )
+    );
+    println!();
+    println!("{}", strings::get("drive.submit_manual"));
+    println!("  https://github.com/freemkv/freemkv/issues/new");
+    println!();
+    println!(
+        "{}",
+        strings::fmt("drive.submit_issue_title", &[("title", title)])
+    );
+    println!();
+    println!("{}", strings::get("drive.submit_issue_body"));
+    println!("────────────────────────────────────────");
+    print!("{}", body);
+    println!("────────────────────────────────────────");
 }
 
 fn zip_directory(dir: &std::path::Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -486,6 +525,12 @@ fn zip_directory(dir: &std::path::Path) -> Result<Vec<u8>, Box<dyn std::error::E
         let entry = entry?;
         if entry.file_type()?.is_file() {
             let name = entry.file_name().to_string_lossy().to_string();
+            // Skip our own output: a repeat `--share` in the same directory
+            // would otherwise nest the previous run's profile.zip inside the new
+            // archive.
+            if name == "profile.zip" {
+                continue;
+            }
             zip.start_file(&name, options)?;
             let data = std::fs::read(entry.path())?;
             zip.write_all(&data)?;
@@ -497,7 +542,11 @@ fn zip_directory(dir: &std::path::Path) -> Result<Vec<u8>, Box<dyn std::error::E
 }
 
 fn save_bin(dir: &std::path::Path, name: &str, data: &[u8]) {
-    std::fs::write(dir.join(name), data).unwrap_or_else(|_| panic!("Cannot write {}", name));
+    let path = dir.join(name);
+    if let Err(e) = std::fs::write(&path, data) {
+        eprintln!("Cannot write {}: {}", path.display(), e);
+        std::process::exit(1);
+    }
 }
 
 fn hex_dump(data: &[u8]) -> String {
@@ -513,8 +562,72 @@ fn hex_dump(data: &[u8]) -> String {
         .join("\n  ")
 }
 
+/// Reduce an untrusted firmware-derived string to a safe single path component:
+/// lowercase ASCII alphanumerics, `-`, and `_` only; every other byte (spaces,
+/// `/`, `\`, `.`, NUL, multibyte) becomes `-`; runs of `-` collapse to one; and
+/// leading/trailing `-` are trimmed. The result can never be `.`, `..`, contain
+/// a separator, or escape the working directory. Falls back to `drive` if empty.
+fn sanitize_component(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut last_dash = false;
+    for c in s.chars() {
+        let keep = if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            true
+        } else if c == '_' {
+            out.push('_');
+            true
+        } else {
+            // Collapse any run of disallowed chars into a single '-'.
+            if !last_dash {
+                out.push('-');
+            }
+            last_dash = true;
+            continue;
+        };
+        if keep {
+            last_dash = false;
+        }
+    }
+    let trimmed = out.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "drive".to_string()
+    } else {
+        trimmed
+    }
+}
+
+/// Escape a string for embedding inside a TOML basic (double-quoted) string.
+///
+/// The drive identity fields come from raw INQUIRY / GET_CONFIG bytes under
+/// firmware control, so a value can legitimately contain a `"`, `\`, or a
+/// control character (newline, NUL, etc.). Embedded verbatim those break the
+/// `key = "..."` line and make `drive.toml` unparseable. Backslash and quote
+/// are backslash-escaped; the TOML-defined control escapes (`\n`, `\r`, `\t`)
+/// are emitted by name; every other C0 control / DEL becomes a `\uXXXX` escape.
+/// Ordinary printable text passes through unchanged.
+fn toml_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c.is_control()) => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 fn format_date(fw_date: &str) -> String {
-    if fw_date.len() < 8 {
+    // The byte-index slices below are only sound on ASCII. `len()` is a byte
+    // length, so a corrupted/non-ASCII firmware-date field (multibyte UTF-8
+    // with a char boundary mid-slice) would panic. Guard on `is_ascii()` and
+    // fall through to the raw passthrough for anything unexpected.
+    if fw_date.len() < 8 || !fw_date.is_ascii() {
         return fw_date.to_string();
     }
     if fw_date.starts_with("21") && fw_date.len() >= 12 {
@@ -548,6 +661,10 @@ fn base64_encode(input: &[u8]) -> String {
     out
 }
 
+// Decoder is the inverse of `base64_encode`; its only consumer is the round-trip
+// test that guards the encoder, so it is gated test-only and never compiled into
+// the release binary.
+#[cfg(test)]
 fn base64_decode(input: &str) -> Vec<u8> {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = Vec::new();
@@ -572,9 +689,131 @@ fn base64_decode(input: &str) -> Vec<u8> {
     out
 }
 
+/// Decode a TOML basic (double-quoted) string body — the inverse of
+/// [`toml_escape`]. Test-only: it exists to prove the encoder's output is a
+/// well-formed basic string that round-trips, without pulling in a full TOML
+/// parser dependency. Panics on a malformed escape (which would mean the
+/// encoder emitted something a real TOML parser would also reject).
+#[cfg(test)]
+fn toml_basic_unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            // A raw control char or quote inside a basic-string body is invalid
+            // TOML — the encoder must never produce one.
+            assert!(
+                c != '"' && !c.is_control(),
+                "unescaped control/quote in basic string body: {c:?}"
+            );
+            out.push(c);
+            continue;
+        }
+        match chars.next().expect("dangling escape") {
+            '\\' => out.push('\\'),
+            '"' => out.push('"'),
+            'n' => out.push('\n'),
+            'r' => out.push('\r'),
+            't' => out.push('\t'),
+            'u' => {
+                let hex: String = chars.by_ref().take(4).collect();
+                let cp = u32::from_str_radix(&hex, 16).expect("bad \\u escape");
+                out.push(char::from_u32(cp).expect("invalid scalar in \\u escape"));
+            }
+            other => panic!("unsupported escape \\{other}"),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{base64_decode, base64_encode, format_date, hex_dump};
+    use super::{
+        base64_decode, base64_encode, format_date, hex_dump, sanitize_component,
+        toml_basic_unescape, toml_escape,
+    };
+
+    #[test]
+    fn sanitize_component_blocks_path_traversal() {
+        // Untrusted firmware strings must never escape CWD or become . / .. .
+        assert!(!sanitize_component("../../etc/passwd").contains('/'));
+        assert!(!sanitize_component("..\\..\\windows").contains('\\'));
+        assert_ne!(sanitize_component(".."), "..");
+        assert_ne!(sanitize_component("."), ".");
+        // No path separators or NUL survive.
+        for bad in ["a/b", "a\\b", "a\0b", "/abs", "lead/../x"] {
+            let s = sanitize_component(bad);
+            assert!(
+                !s.contains('/') && !s.contains('\\') && !s.contains('\0'),
+                "{s:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn sanitize_component_collapses_and_trims_dashes() {
+        // Runs of disallowed chars collapse to a single '-' (fixes the old
+        // single-pass "--"->"-" that left residual "--" on "---").
+        assert_eq!(sanitize_component("a   b"), "a-b");
+        assert_eq!(sanitize_component("a---b"), "a-b");
+        assert_eq!(sanitize_component("a / / b"), "a-b");
+        assert_eq!(sanitize_component("-lead-"), "lead");
+        assert_eq!(sanitize_component("HL-DT-ST BD"), "hl-dt-st-bd");
+        // Empty / all-bad input falls back to a safe default.
+        assert_eq!(sanitize_component(""), "drive");
+        assert_eq!(sanitize_component("///"), "drive");
+        // Underscores and alphanumerics survive, lowercased.
+        assert_eq!(sanitize_component("Foo_Bar1"), "foo_bar1");
+    }
+
+    #[test]
+    fn toml_escape_round_trips_to_parseable_toml() {
+        // Regression (HIGH): firmware INQUIRY/GET_CONFIG strings were embedded
+        // into `drive.toml` double-quoted values with NO escaping, so a value
+        // containing `"`, `\`, or a newline produced an unparseable file. Every
+        // such value must escape to a well-formed basic string that decodes back
+        // to the original.
+        let cases = [
+            r#"HL-DT-ST"#,          // ordinary
+            r#"BAD"VENDOR"#,        // embedded quote
+            r#"C:\firmware\v2"#,    // embedded backslashes
+            "line1\nline2",         // embedded newline
+            "tab\there\r\n",        // tab + CRLF
+            "nul\0byte",            // NUL control char
+            r#"both \ and " here"#, // both special chars
+            "ünïcödé",              // multibyte printable passes through
+        ];
+        for raw in cases {
+            let escaped = toml_escape(raw);
+            // The escaped body must contain no raw quote, backslash-quote aside,
+            // and no raw control characters — i.e. it is a valid basic-string body.
+            assert!(
+                !escaped.chars().any(|c| c == '\n' || c == '\r'),
+                "escaped value still contains a raw newline: {escaped:?}"
+            );
+            // Build the actual line we emit and confirm it parses (manually) into
+            // exactly the original value.
+            let line = format!("manufacturer = \"{escaped}\"\n");
+            let body = line
+                .trim_end()
+                .strip_prefix("manufacturer = \"")
+                .and_then(|s| s.strip_suffix('"'))
+                .expect("well-formed key = \"...\" line");
+            assert_eq!(
+                toml_basic_unescape(body),
+                raw,
+                "round-trip failed for {raw:?} (escaped {escaped:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn format_date_non_ascii_passes_through() {
+        // Regression: byte-slicing a non-ASCII firmware date panicked. It must
+        // fall through to the raw passthrough instead.
+        let s = "20\u{00e9}1231"; // 'é' is multibyte; len()>=8 but not ASCII
+        assert_eq!(format_date(s), s);
+    }
 
     #[test]
     fn base64_encode_rfc4648_vectors() {

@@ -280,7 +280,7 @@ git tag -a v0.X.Y -m "v0.X.Y" && git push origin v0.X.Y --force
 
 ## Hard Rules (STOP IMMEDIATELY IF VIOLATED)
 
-1. **Never add `
+1. **Never add `Co-Authored-By: Claude`** to commit messages. One contributor: MattJackson.
 
 2. **Don't tag before bumping Cargo.toml.** CI verify job catches mismatch (v0.17.2 bug). **STOP if you tagged first — delete and recreate the tag.**
 

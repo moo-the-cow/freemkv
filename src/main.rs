@@ -26,13 +26,31 @@ fn main() {
     }
     let args: Vec<String> = std::env::args().collect();
 
-    // Parse --language before anything else
+    // Parse --language before anything else.
+    //
+    // Apply the same is-URL guard `collect_urls` uses: a value-flag must not
+    // swallow a following positional stream URL. `freemkv --language disc://
+    // mkv://out.mkv` would otherwise eat `disc://` as the "language", leaving a
+    // single URL that silently degrades into an info/usage no-op. The same
+    // applies to a following flag token (e.g. `freemkv --language --verbose
+    // ...`): a leading `-` means the value is missing, not a language code. If
+    // the next token is a URL, a flag, or --language is the last token, the
+    // value is missing: warn and leave the token as positional. Strings aren't
+    // initialized yet, so this diagnostic is necessarily plain English.
     let mut filtered = Vec::new();
     let mut i = 0;
     while i < args.len() {
-        if (args[i] == "--language" || args[i] == "--lang") && i + 1 < args.len() {
-            strings::set_language(&args[i + 1]);
-            i += 2;
+        if args[i] == "--language" || args[i] == "--lang" {
+            match args.get(i + 1) {
+                Some(v) if !is_url(v) && !v.starts_with('-') => {
+                    strings::set_language(v);
+                    i += 2;
+                }
+                _ => {
+                    eprintln!("{}: requires a language code (e.g. --language de)", args[i]);
+                    i += 1;
+                }
+            }
         } else {
             filtered.push(args[i].clone());
             i += 1;
@@ -42,8 +60,12 @@ fn main() {
     strings::init();
 
     if args.len() < 2 {
+        // Bare invocation with no subcommand/URL: print usage but exit non-zero
+        // so a scripted `freemkv; echo $?` (e.g. a misconfigured wrapper) sees a
+        // failure rather than a false success. Explicit `help`/`--help`/`-h`
+        // still exits 0 (handled below).
         usage();
-        std::process::exit(0);
+        std::process::exit(2);
     }
 
     match args[1].as_str() {
@@ -55,35 +77,22 @@ fn main() {
 
         // Everything else: freemkv <source> <dest>
         _ => {
-            // Flags that consume the next argument as a value
-            const VALUE_FLAGS: &[&str] = &["-t", "--title", "-k", "--keydb"];
-
-            // Collect URLs (non-flag args) and flags
-            let mut urls = Vec::new();
-            let mut flags = Vec::new();
-            let mut skip_next = false;
-            for arg in &args[1..] {
-                if skip_next {
-                    skip_next = false;
-                    continue;
-                }
-                if arg.starts_with('-') {
-                    flags.push(arg.clone());
-                    if VALUE_FLAGS.contains(&arg.as_str()) {
-                        skip_next = true;
-                    }
-                } else {
-                    urls.push(arg.clone());
-                }
-            }
+            let urls = collect_urls(&args[1..]);
 
             if urls.len() == 2 {
                 if !pipe::run(&urls[0], &urls[1], &args[1..]) {
                     std::process::exit(1);
                 }
             } else if urls.len() == 1 {
-                // Single URL with no dest — show info
-                info_cmd(&args[1..]);
+                // Single URL with no dest — show info. `info_cmd` treats its
+                // `args[0]` as the URL, but a preceding flag (e.g. `freemkv
+                // --verbose disc://`) would otherwise sit at `args[0]` and be
+                // parsed as the URL. `collect_urls` already resolved the real
+                // URL token, so put it first and append the remaining (non-URL)
+                // flag tokens so downstream flags like `-d`/`--share` survive.
+                let mut info_args = vec![urls[0].clone()];
+                info_args.extend(args[1..].iter().filter(|a| **a != urls[0]).cloned());
+                info_cmd(&info_args);
             } else {
                 eprintln!("Usage: freemkv <source> <dest> [flags]");
                 eprintln!("       freemkv info <url>");
@@ -93,6 +102,47 @@ fn main() {
             }
         }
     }
+}
+
+/// True if `s` looks like a stream URL (`scheme://...`).
+fn is_url(s: &str) -> bool {
+    s.contains("://")
+}
+
+/// Split positional stream URLs out of an argument list, accounting for
+/// value-taking flags (`-t`, `-k`).
+///
+/// A value-flag normally consumes the following token as its value, but it must
+/// NOT swallow a positional stream URL (`scheme://...`): `freemkv -k disc://
+/// mkv://out.mkv` would otherwise let `-k` eat `disc://`, leaving a single URL
+/// that silently routes to `info` instead of ripping. So if a value-flag is
+/// followed by a URL token, the URL is kept as positional and the flag's value
+/// is treated as absent (pipe::run then reports the missing value).
+fn collect_urls(args: &[String]) -> Vec<String> {
+    // Flags that consume the next argument as a value.
+    const VALUE_FLAGS: &[&str] = &["-t", "--title", "-k", "--keydb"];
+
+    let mut urls = Vec::new();
+    let mut skip_next = false;
+    for arg in args {
+        if skip_next {
+            skip_next = false;
+            // The greedy flag's "value" is actually a positional URL —
+            // reclassify it as a URL instead of consuming it.
+            if is_url(arg) {
+                urls.push(arg.clone());
+            }
+            continue;
+        }
+        if arg.starts_with('-') {
+            if VALUE_FLAGS.contains(&arg.as_str()) {
+                skip_next = true;
+            }
+        } else {
+            urls.push(arg.clone());
+        }
+    }
+    urls
 }
 
 fn info_cmd(args: &[String]) {
@@ -119,9 +169,42 @@ fn info_cmd(args: &[String]) {
                 disc_info::run(&disc_args);
             }
         }
-        libfreemkv::StreamUrl::M2ts { .. }
-        | libfreemkv::StreamUrl::Mkv { .. }
-        | libfreemkv::StreamUrl::Iso { .. } => {
+        libfreemkv::StreamUrl::Iso { path } => {
+            // Listing titles needs NO AACS key — only clear UDF navigation.
+            // Scan the ISO keylessly and reuse disc_info's full title list
+            // (duration, size, clip count, video/audio/subtitle streams).
+            // Going through the key-gated `input()` here would hit libfreemkv's
+            // no-key gate and surface E7022 for an encrypted disc, and would
+            // only ever open a single title. `-k`/`--keydb` is accepted but the
+            // listing never requires it. `--full` shows every title.
+            let full = args[1..].iter().any(|a| a == "--full" || a == "-f");
+            let mut reader = match libfreemkv::FileSectorSource::open(path) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            let capacity =
+                <libfreemkv::FileSectorSource as libfreemkv::SectorSource>::capacity_sectors(
+                    &reader,
+                );
+            let disc = match libfreemkv::Disc::scan_image(
+                &mut reader,
+                capacity,
+                &libfreemkv::ScanOptions::default(),
+            ) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            println!("freemkv {}", env!("CARGO_PKG_VERSION"));
+            println!();
+            disc_info::print_disc_titles(&disc, full);
+        }
+        libfreemkv::StreamUrl::M2ts { .. } | libfreemkv::StreamUrl::Mkv { .. } => {
             match libfreemkv::input(url, &libfreemkv::InputOptions::default()) {
                 Ok(stream) => {
                     let meta = stream.info();
@@ -231,9 +314,15 @@ fn verify_cmd(args: &[String]) {
             std::process::exit(1);
         }
     };
+    // init()/probe_disc() are best-effort: many drives lack the firmware
+    // support they probe for and `Disc::scan` below is the authoritative gate.
+    // But don't print an unconditional "OK" that masks a genuine failure —
+    // report WARN and the error so a later scan failure isn't mysterious.
     let _ = drive.wait_ready();
-    let _ = drive.init();
-    eprintln!("OK");
+    match drive.init() {
+        Ok(_) => eprintln!("OK"),
+        Err(e) => eprintln!("WARN ({})", e),
+    }
 
     eprint!("Scanning...");
     let scan_opts = libfreemkv::ScanOptions::default();
@@ -293,33 +382,36 @@ fn verify_cmd(args: &[String]) {
     );
     eprintln!(); // newline after progress
 
-    // Results
+    // Results. Guard the divisor: a title whose extents sum to zero sectors
+    // would otherwise print `NaN%` on every row (mirrors the library's own
+    // `VerifyResult::readable_pct` zero-guard).
+    let pct = |n: u64| pct_of(n, result.total_sectors);
     println!();
     println!("Results:");
     println!(
         "  Good:        {:>12}  ({:.4}%)",
         result.good,
-        result.good as f64 / result.total_sectors as f64 * 100.0
+        pct(result.good)
     );
     if result.slow > 0 {
         println!(
             "  Slow:        {:>12}  ({:.4}%)",
             result.slow,
-            result.slow as f64 / result.total_sectors as f64 * 100.0
+            pct(result.slow)
         );
     }
     if result.recovered > 0 {
         println!(
             "  Recovered:   {:>12}  ({:.4}%)",
             result.recovered,
-            result.recovered as f64 / result.total_sectors as f64 * 100.0
+            pct(result.recovered)
         );
     }
     if result.bad > 0 {
         println!(
             "  Bad:         {:>12}  ({:.4}%)",
             result.bad,
-            result.bad as f64 / result.total_sectors as f64 * 100.0
+            pct(result.bad)
         );
     }
 
@@ -347,14 +439,13 @@ fn verify_cmd(args: &[String]) {
                 }
                 None => String::new(),
             };
+            // `count` is a half-open span; the displayed range is inclusive, so
+            // the last LBA is start + count - 1. Guard count==0 (would underflow
+            // and contradict the trailing "0 sectors").
+            let last_lba = inclusive_last_lba(range.start_lba, range.count);
             println!(
                 "  {} sectors {}-{} ({:.1} GB{}): {} sectors",
-                status_str,
-                range.start_lba,
-                range.start_lba + range.count,
-                gb,
-                ch_str,
-                range.count
+                status_str, range.start_lba, last_lba, gb, ch_str, range.count
             );
         }
     }
@@ -387,6 +478,23 @@ fn verify_cmd(args: &[String]) {
     std::process::exit(if result.bad > 0 { 1 } else { 0 });
 }
 
+/// `n` as a percentage of `total`, guarding the zero divisor (which would yield
+/// `NaN%`). Returns 0.0 when `total == 0`.
+fn pct_of(n: u64, total: u64) -> f64 {
+    if total > 0 {
+        n as f64 / total as f64 * 100.0
+    } else {
+        0.0
+    }
+}
+
+/// Inclusive last LBA of a half-open `[start, start+count)` range, for display.
+/// Guards `count == 0` so the printed span matches the trailing sector count
+/// instead of underflowing / overshooting by one.
+fn inclusive_last_lba(start_lba: u32, count: u32) -> u32 {
+    start_lba.saturating_add(count.saturating_sub(1))
+}
+
 fn usage() {
     println!("freemkv {}", env!("CARGO_PKG_VERSION"));
     println!();
@@ -406,13 +514,12 @@ fn usage() {
     println!("  null://                  Discard (benchmarking)");
     println!();
     println!("  All URLs require a scheme:// prefix.");
-    println!("  File paths follow the scheme: mkv://./Movie.mkv, m2ts:///tmp/Movie.m2ts");
+    println!("  File paths follow the scheme: mkv://./Movie.mkv, m2ts://./Movie.m2ts");
     println!();
     println!("Examples:");
     println!("  freemkv disc:// mkv://Movie.mkv                     Rip disc to MKV");
     println!("  freemkv disc:// m2ts://Movie.m2ts                   Rip disc to m2ts");
     println!("  freemkv disc:///dev/sg4 mkv://Movie.mkv             Rip specific drive");
-    println!("  freemkv disc:// mkv://Movie.mkv                    Rip all titles");
     println!("  freemkv disc:// mkv://Movie.mkv -t 1               Rip main feature only");
     println!("  freemkv disc:// mkv://Movie.mkv -t 1 -t 3          Rip titles 1 and 3");
     println!(
@@ -490,5 +597,85 @@ fn update_keys(args: &[String]) {
             eprintln!("{}", e);
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{collect_urls, inclusive_last_lba, pct_of};
+
+    #[test]
+    fn pct_of_guards_zero_total() {
+        // The verify NaN% bug: a zero-sector title divided by total_sectors==0.
+        assert_eq!(pct_of(0, 0), 0.0);
+        assert_eq!(pct_of(5, 0), 0.0);
+        // Normal cases still compute.
+        assert_eq!(pct_of(50, 100), 50.0);
+        assert_eq!(pct_of(1, 4), 25.0);
+        assert!(pct_of(0, 0).is_finite(), "must not be NaN");
+    }
+
+    #[test]
+    fn inclusive_last_lba_matches_count() {
+        // Single bad sector at LBA 100 → "100-100", not the contradictory
+        // "100-101" the half-open `start + count` produced.
+        assert_eq!(inclusive_last_lba(100, 1), 100);
+        assert_eq!(inclusive_last_lba(100, 5), 104);
+        // count==0 must not underflow.
+        assert_eq!(inclusive_last_lba(100, 0), 100);
+        assert_eq!(inclusive_last_lba(0, 0), 0);
+        // A range that reaches the top of the address space must not overflow
+        // the `start + (count-1)` add (saturating_add caps at u32::MAX).
+        assert_eq!(inclusive_last_lba(u32::MAX, 1), u32::MAX);
+        assert_eq!(inclusive_last_lba(u32::MAX - 1, 5), u32::MAX);
+        assert_eq!(inclusive_last_lba(u32::MAX, 1000), u32::MAX);
+    }
+
+    fn v(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn plain_two_urls() {
+        assert_eq!(
+            collect_urls(&v(&["disc://", "mkv://out.mkv"])),
+            v(&["disc://", "mkv://out.mkv"])
+        );
+    }
+
+    #[test]
+    fn value_flag_takes_non_url_value() {
+        // -t 1 consumes "1"; the two URLs remain positional.
+        assert_eq!(
+            collect_urls(&v(&["disc://", "mkv://out.mkv", "-t", "1"])),
+            v(&["disc://", "mkv://out.mkv"])
+        );
+        // -k with a real path value.
+        assert_eq!(
+            collect_urls(&v(&["-k", "keydb.cfg", "disc://", "mkv://out.mkv"])),
+            v(&["disc://", "mkv://out.mkv"])
+        );
+    }
+
+    #[test]
+    fn value_flag_does_not_swallow_positional_url() {
+        // Regression: `-k` must not eat `disc://`, leaving a single URL that
+        // silently routes to `info`. Both URLs must survive as positional.
+        assert_eq!(
+            collect_urls(&v(&["-k", "disc://", "mkv://out.mkv"])),
+            v(&["disc://", "mkv://out.mkv"])
+        );
+        assert_eq!(
+            collect_urls(&v(&["-t", "disc://", "mkv://out.mkv"])),
+            v(&["disc://", "mkv://out.mkv"])
+        );
+    }
+
+    #[test]
+    fn boolean_flags_ignored() {
+        assert_eq!(
+            collect_urls(&v(&["--multipass", "disc://", "iso://d.iso", "--raw"])),
+            v(&["disc://", "iso://d.iso"])
+        );
     }
 }
