@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (optional - will use Cargo.toml if not specified)'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -19,11 +24,30 @@ jobs:
       - name: Verify Cargo.toml version matches tag
         run: |
           CARGO_VER="v$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')"
-          if [ "$CARGO_VER" != "${{ github.ref_name }}" ]; then
-            echo "::error::Cargo.toml says $CARGO_VER but tag is ${{ github.ref_name }}"
-            exit 1
+          
+          # For manual dispatch, skip verification or use provided version
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "${{ inputs.version }}" ]; then
+              if [ "${{ inputs.version }}" != "$CARGO_VER" ]; then
+                echo "::warning::Manual version ${{ inputs.version }} differs from Cargo.toml version $CARGO_VER"
+              else
+                echo "Version match: $CARGO_VER"
+              fi
+            else
+              echo "Manual run without version check, using Cargo.toml version: $CARGO_VER"
+            fi
+            # Set output for later use
+            echo "version=$CARGO_VER" >> $GITHUB_OUTPUT
+          else
+            # For tag pushes, enforce strict matching
+            if [ "$CARGO_VER" != "${{ github.ref_name }}" ]; then
+              echo "::error::Cargo.toml says $CARGO_VER but tag is ${{ github.ref_name }}"
+              exit 1
+            fi
+            echo "Version match: $CARGO_VER"
+            echo "version=$CARGO_VER" >> $GITHUB_OUTPUT
           fi
-          echo "Version match: $CARGO_VER"
+        id: verify
 
   build:
     needs: verify
@@ -79,14 +103,16 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf "../../../freemkv-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" freemkv
+          VERSION="${{ needs.verify.outputs.version || github.ref_name }}"
+          tar czf "../../../freemkv-${VERSION}-${{ matrix.target }}.tar.gz" freemkv
           tar czf "../../../freemkv-${{ matrix.target }}.tar.gz" freemkv
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Compress-Archive -Path "target/${{ matrix.target }}/release/freemkv.exe" -DestinationPath "freemkv-${{ github.ref_name }}-${{ matrix.target }}.zip"
+          $VERSION = "${{ needs.verify.outputs.version || github.ref_name }}"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/freemkv.exe" -DestinationPath "freemkv-${VERSION}-${{ matrix.target }}.zip"
           Compress-Archive -Path "target/${{ matrix.target }}/release/freemkv.exe" -DestinationPath "freemkv-${{ matrix.target }}.zip"
 
       - name: Upload
@@ -95,10 +121,11 @@ jobs:
           files: |
             *.tar.gz
             *.zip
+          tag_name: ${{ needs.verify.outputs.version || github.ref_name }}
 
   update-homepage:
-    needs: build
-    if: always() && needs.build.result != 'cancelled'
+    needs: [verify, build]
+    if: always() && needs.build.result != 'cancelled' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Update org README with new version
@@ -107,4 +134,4 @@ jobs:
           token: ${{ secrets.ORG_DISPATCH_TOKEN }}
           repository: freemkv/.github
           event-type: new-release
-          client-payload: '{"version": "${{ github.ref_name }}"}' 
+          client-payload: '{"version": "${{ needs.verify.outputs.version || github.ref_name }}"}'
