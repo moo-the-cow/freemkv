@@ -36,9 +36,9 @@ jobs:
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
             asset: freemkv-aarch64-linux
-          # x86_64-apple-darwin deferred to rc2: the libfreemkv C-shim build.rs
-          # needs the -arch fix (staged for rc2) to cross-compile on the ARM
-          # macos-latest runner. ARM macOS + the other targets ship for rc1.
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            asset: freemkv-x86_64-macos
           - target: aarch64-apple-darwin
             os: macos-latest
             asset: freemkv-aarch64-macos
