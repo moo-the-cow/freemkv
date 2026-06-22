@@ -37,7 +37,18 @@ pub fn run(args: &[String]) {
                 }
             }
             "--quiet" | "-q" => quiet = true,
-            "--verbose" | "-v" => verbose = true,
+            // `--log-level N` sets the tracing level (in main::init_logging);
+            // here it also widens stdout detail at level >= 2. Accept + skip
+            // its value so it isn't treated as a positional / unknown option.
+            "--log-level" => {
+                i += 1;
+                if args.get(i).and_then(|s| s.parse::<u8>().ok()).unwrap_or(1) >= 2 {
+                    verbose = true;
+                }
+            }
+            "--log-file" => {
+                i += 1; // skip the path value
+            }
             "--full" | "-f" => full = true,
             "--basic" | "-b" => basic = true,
             "--help" | "-h" => {
@@ -382,7 +393,11 @@ fn format_video(v: &VideoStream, verbose: bool) -> String {
     if v.color_space == ColorSpace::Bt2020 {
         parts.push("BT.2020".into());
     }
-    if v.secondary && !v.label.is_empty() {
+    // A secondary Dolby Vision video stream is the enhancement layer (the
+    // library no longer carries the English descriptor — it's localized here).
+    if v.secondary && v.hdr == HdrFormat::DolbyVision {
+        parts.push(strings::get("disc.dolby_vision_el"));
+    } else if v.secondary && !v.label.is_empty() {
         parts.push(v.label.clone());
     }
     if verbose {

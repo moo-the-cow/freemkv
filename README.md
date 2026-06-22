@@ -6,7 +6,7 @@
 
 Open source 4K UHD / Blu-ray / DVD backup tool. Two arguments — source and destination. Stream URLs let you rip, remux, and transfer between any combination of disc, file, and network.
 
-Built-in keys cover DVDs and Blu-rays (AACS 1.0) — no setup. For UHD (AACS 2.0 / 2.1) discs, an optional `keydb.cfg` supplies disc-specific volume unique keys.
+DVDs (CSS) need no setup. Blu-ray and UHD (AACS) require a `keydb.cfg` supplying disc-specific volume unique keys.
 
 ## Quick Start
 
@@ -28,11 +28,16 @@ sudo mv freemkv /usr/local/bin/
 # Windows — download .zip from https://github.com/freemkv/freemkv/releases/latest
 ```
 
+Prefer a single plain binary (no archive) with a sha256 checksum? Each
+release also publishes unwrapped, ready-to-run binaries like
+`freemkv-x86_64-linux`. See [INSTALL.md](INSTALL.md) for the full list,
+checksum verification, and per-platform steps.
+
 ### 2. Set up decryption keys (UHD discs only)
 
 **DVD:** No setup needed. CSS decryption works out of the box.
 
-**Blu-ray (AACS 1.0):** No setup needed. Built-in keys cover the full MKB range.
+**Blu-ray + UHD (AACS):** Require a `keydb.cfg` (default `~/.config/freemkv/keydb.cfg`) holding the disc keys; no AACS keys are compiled in.
 
 **4K UHD (AACS 2.0 / 2.1):** UHD discs use per-disc volume unique keys (VUKs), so freemkv reads them from an optional `keydb.cfg`. Fetch the latest one from a community source and save it to `~/.config/freemkv/keydb.cfg`, or point `update-keys` at a URL:
 
@@ -208,12 +213,38 @@ Labels are preserved in all output formats — MKV track names and M2TS metadata
 ```
 -t, --title N       Select title (1-based, repeatable). Default: all.
 -k, --keydb PATH    KEYDB.cfg path (optional; only required for UHD / AACS 2.0+ discs)
--v, --verbose       Show AACS/drive debug info
+    --log-level N   Log verbosity: 1 = warnings/errors only (default), 2 = info,
+                    3 = debug, 4 = trace. At level ≥2 also widens human stdout detail.
+    --log-file PATH Also write the full log to PATH (for bug reports)
 -q, --quiet         Suppress output
     --raw           Skip decryption (raw encrypted output)
 -s, --share         Submit drive profile (with info disc://)
 -m, --mask          Mask serial numbers (with --share)
 ```
+
+Logging goes to **stderr** (so stdout stays clean for piping to `mkv://`/`m2ts://`).
+`RUST_LOG` overrides `--log-level` if set.
+
+## Getting a debug log (for bug reports)
+
+If something fails or hangs, re-run with `--log-level 3` and capture the log to a
+file:
+
+```bash
+freemkv --log-level 3 --log-file freemkv-debug.log disc:// mkv://"Movie.mkv"
+```
+
+Level 3 (debug) is recommended for bug reports — comprehensive diagnostics at a
+manageable size. On a successful rip the debug log looks similar to info; the extra
+detail appears on the failure path (CSS auth, retries, read errors, mux-stage decisions,
+stalls) — which is exactly when you need it. If a maintainer asks for maximum detail,
+use `--log-level 4` (trace), but note it's a per-sector firehose that can be gigabytes
+on a long rip.
+
+If it hangs, let it sit ~30 s, then Ctrl-C — the last `phase=… "alive"` line names
+the exact stage and position (e.g. LBA) where it stuck. Attach `freemkv-debug.log`
+to your report. **Keys are never written to logs** (the log contains paths and disc
+metadata, never CSS/AACS key material).
 
 ## Multi-language
 

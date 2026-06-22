@@ -20,11 +20,89 @@ mod strings;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-fn main() {
-    if std::env::var("RUST_LOG").is_ok() {
-        tracing_subscriber::fmt::init();
+/// Worker guard for the optional non-blocking file log layer. Held for the
+/// life of the process so buffered records are flushed on exit; `None` when
+/// `--log-file` isn't given.
+static LOG_GUARD: std::sync::OnceLock<tracing_appender::non_blocking::WorkerGuard> =
+    std::sync::OnceLock::new();
+
+/// Initialise tracing. Always installs a subscriber, so `--log-level` and
+/// `--log-file` actually drive log output. Logs go to STDERR (stdout stays
+/// clean for `mkv://` / `m2ts://` piping); with `--log-file` a non-blocking
+/// file layer is added too.
+///
+/// Filter precedence: `RUST_LOG` wins if set; otherwise `--log-level N` maps
+/// 1→warn, 2→info, 3→debug, 4→trace for the `freemkv` and `libfreemkv`
+/// targets (everything else stays at error). Default level is 1.
+fn init_logging(args: &[String]) {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::{EnvFilter, fmt};
+
+    // `--log-level N` (1=warn, 2=info, 3=debug, 4=trace). Default 1. The
+    // per-subcommand parsers read the same flag to widen stdout detail at >=2.
+    let mut level_num = 1u8;
+    let mut log_file: Option<String> = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--log-level" => {
+                if let Some(n) = it.next().and_then(|s| s.parse::<u8>().ok()) {
+                    level_num = n.clamp(1, 4);
+                }
+            }
+            "--log-file" => {
+                if let Some(p) = it.next() {
+                    log_file = Some(p.clone());
+                }
+            }
+            _ => {}
+        }
     }
+
+    let env_filter = if std::env::var("RUST_LOG").is_ok() {
+        EnvFilter::from_default_env()
+    } else {
+        let level = match level_num {
+            1 => "warn",
+            2 => "info",
+            3 => "debug",
+            _ => "trace",
+        };
+        EnvFilter::new(format!("error,freemkv={level},libfreemkv={level}"))
+    };
+
+    // STDERR layer — always. Keep stdout clean for stream piping.
+    let stderr_layer = fmt::layer().with_writer(std::io::stderr);
+
+    let registry = tracing_subscriber::registry()
+        .with(env_filter)
+        .with(stderr_layer);
+
+    if let Some(path) = log_file {
+        let p = std::path::Path::new(&path);
+        let dir = p.parent().filter(|d| !d.as_os_str().is_empty());
+        let file_appender = match (dir, p.file_name()) {
+            (Some(dir), Some(name)) => tracing_appender::rolling::never(dir, name),
+            (None, Some(name)) => tracing_appender::rolling::never(".", name),
+            _ => {
+                eprintln!("--log-file: invalid path '{path}'");
+                registry.init();
+                return;
+            }
+        };
+        let (nb, guard) = tracing_appender::non_blocking(file_appender);
+        let _ = LOG_GUARD.set(guard);
+        let file_layer = fmt::layer().with_ansi(false).with_writer(nb);
+        registry.with(file_layer).init();
+    } else {
+        registry.init();
+    }
+}
+
+fn main() {
     let args: Vec<String> = std::env::args().collect();
+    init_logging(&args);
 
     // Parse --language before anything else.
     //
@@ -120,7 +198,14 @@ fn is_url(s: &str) -> bool {
 /// is treated as absent (pipe::run then reports the missing value).
 fn collect_urls(args: &[String]) -> Vec<String> {
     // Flags that consume the next argument as a value.
-    const VALUE_FLAGS: &[&str] = &["-t", "--title", "-k", "--keydb"];
+    const VALUE_FLAGS: &[&str] = &[
+        "-t",
+        "--title",
+        "-k",
+        "--keydb",
+        "--log-file",
+        "--log-level",
+    ];
 
     let mut urls = Vec::new();
     let mut skip_next = false;
@@ -531,9 +616,7 @@ fn usage() {
     println!(
         "  freemkv disc:// iso://Disc.iso --multipass        Sweep with mapfile for multipass recovery"
     );
-    println!(
-        "  freemkv iso://Disc.iso iso://Disc.iso --multipass Patch bad sectors (one retry pass)"
-    );
+    println!("  freemkv disc:// iso://Disc.iso --multipass        Re-run to patch bad sectors");
     println!("  freemkv iso://Disc.iso mkv://Movie.mkv             ISO to MKV");
     println!("  freemkv m2ts://Movie.m2ts mkv://Movie.mkv          Remux m2ts to MKV");
     println!("  freemkv disc:// network://192.0.2.10:9000           Stream to network");
@@ -545,7 +628,10 @@ fn usage() {
     println!("Flags:");
     println!("  -t, --title N       Select title (1-based, repeatable). Default: all.");
     println!("  -k, --keydb PATH    KEYDB.cfg path");
-    println!("  -v, --verbose       Show AACS/drive debug info");
+    println!("      --log-level N   1=warnings 2=info 3=debug 4=trace (default 1).");
+    println!("                      Use 3 for bug reports. Logs go to STDERR so");
+    println!("                      stdout stays pipe-clean.");
+    println!("      --log-file PATH Also write logs to PATH (for bug reports).");
     println!("  -q, --quiet         Suppress output");
     println!("      --raw           Skip decryption (raw encrypted output)");
     println!("      --multipass    Write/update mapfile for multipass recovery");

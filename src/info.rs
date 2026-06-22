@@ -39,6 +39,12 @@ pub fn run(args: &[String]) {
             "--mask" | "-m" => mask = true,
             "--quiet" | "-q" => quiet = true,
             "--verbose" | "-v" => verbose = true,
+            // Log-level/log-file tokens are handled by main::init_logging;
+            // accept them here so they aren't rejected as unknown options.
+            "-vv" | "-vvv" => verbose = true,
+            "--log-file" => {
+                i += 1; // skip the path value
+            }
             "--help" | "-h" => {
                 println!("{}", strings::get("drive.share_usage"));
                 println!();

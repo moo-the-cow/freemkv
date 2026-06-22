@@ -95,7 +95,21 @@ fn parse_flags(args: &[String]) -> Result<ParsedFlags, String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "-v" | "--verbose" => f.verbose = true,
+            // `--log-level N` sets the tracing level (main::init_logging); here
+            // it widens prose detail at level >= 2. Swallow its numeric value.
+            "--log-level" => {
+                if let Some(n) = args.get(i + 1).and_then(|s| s.parse::<u8>().ok()) {
+                    f.verbose = n >= 2;
+                    i += 1;
+                }
+            }
+            // `--log-file PATH` is consumed by logging init; swallow its value
+            // here so the path isn't mistaken for a positional / unknown flag.
+            "--log-file" => {
+                if args.get(i + 1).is_some_and(|p| !is_url_token(p)) {
+                    i += 1;
+                }
+            }
             "-q" | "--quiet" => f.quiet = true,
             "--raw" => f.raw = true,
             "--multipass" => f.multipass = true,
@@ -488,7 +502,10 @@ fn drive_scan_opts(keydb_path: &Option<String>) -> libfreemkv::ScanOptions {
     let host_certs = freemkv_keysources::KeydbSource::new(path).host_certs();
     let credentials =
         (!host_certs.is_empty()).then_some(libfreemkv::DriveCredentials { host_certs });
-    libfreemkv::ScanOptions { credentials }
+    libfreemkv::ScanOptions {
+        credentials,
+        ..Default::default()
+    }
 }
 
 /// Resolve an ISO's AACS unit keys once: keyless scan → local keydb →
@@ -1665,9 +1682,19 @@ mod tests {
 
     #[test]
     fn boolean_flags_parse() {
-        let f = parse_flags(&v(&["--raw", "--multipass", "-v", "-q"])).unwrap();
+        // `--log-level 2` (info) widens prose detail → verbose.
+        let f = parse_flags(&v(&["--raw", "--multipass", "--log-level", "2", "-q"])).unwrap();
         assert!(f.raw && f.multipass && f.verbose && f.quiet);
         assert!(f.title_nums.is_empty());
+    }
+
+    #[test]
+    fn log_level_sets_verbose_at_or_above_two() {
+        // Level 1 = quiet prose; 2/3/4 widen it. The numeric value must also be
+        // consumed so it is never mistaken for a positional URL.
+        assert!(!parse_flags(&v(&["--log-level", "1"])).unwrap().verbose);
+        assert!(parse_flags(&v(&["--log-level", "2"])).unwrap().verbose);
+        assert!(parse_flags(&v(&["--log-level", "4"])).unwrap().verbose);
     }
 
     #[test]

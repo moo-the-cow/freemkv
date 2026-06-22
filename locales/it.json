@@ -77,6 +77,7 @@
     "video": "Video",
     "audio": "Audio",
     "subtitle": "Sottotitoli",
+    "dolby_vision_el": "Dolby Vision EL",
     "forced": "forzato",
     "usage": "Uso: freemkv disc-info [--device /dev/sgN] [--full] [--basic] [--quiet]",
     "format_unknown": "Sconosciuto"

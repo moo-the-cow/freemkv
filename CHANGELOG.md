@@ -4,6 +4,40 @@ All notable changes to the `freemkv` CLI are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and the
 project follows semantic versioning.
 
+## [1.0.0-rc.1] - UNRELEASED
+
+First release candidate for 1.0.
+
+### Added
+
+- Keyless DVD/CSS ripping: a CSS-protected DVD now decrypts with no key
+  database. The title key is recovered from the scrambled disc data via
+  libfreemkv's Stevenson attack, so `disc://` to `mkv://` works out of the
+  box on a DVD.
+- Muxing a raw, still-scrambled CSS ISO (`iso://`): `Disc::scan_image`
+  recovers the title key from the image directly, so a raw CSS ISO no longer
+  needs to be pre-decrypted before muxing.
+- `--log-level N` sets the log verbosity: `1` = warnings/errors (default),
+  `2` = info, `3` = debug, `4` = trace. `--log-file PATH` adds a non-blocking
+  file sink alongside stderr. `RUST_LOG` overrides `--log-level` if set.
+  Logs go to stderr so stdout stays pipe-clean for `mkv://`/`m2ts://` piping.
+- Static-binary releases: each tagged release attaches a single static binary
+  per platform (Linux x86_64/aarch64, macOS Intel/Silicon, Windows) with a
+  `.sha256` checksum, alongside the source archives. See `INSTALL.md`.
+
+### Changed
+
+- Correct DVD video output: the MPEG-2 Program-Stream access-unit reassembler
+  in libfreemkv buffers elementary-stream bytes across PES packets and emits
+  exactly one coded picture per MKV block with reconstructed presentation
+  timestamps, replacing the previous per-PES framing that produced corrupted
+  DVD video.
+- MKV output records `freemkv <version>` in the Muxing/Writing application
+  fields.
+- Built on libfreemkv 1.0.0-rc.1: HEVC/H.264/VC-1 param-set keyframe
+  correctness, short-read rejection, `BlockDuration` timescale fix, and CSS
+  key redaction in logs.
+
 ## [0.31.0] - 2026-06-08
 
 Hardening and correctness release across argument parsing, the `info`

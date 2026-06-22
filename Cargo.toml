@@ -1,6 +1,6 @@
 [package]
 name = "freemkv"
-version = "0.31.6"
+version = "1.0.0-rc.1"
 edition = "2024"
 rust-version = "1.86"
 license = "AGPL-3.0-only"
@@ -16,10 +16,11 @@ name = "freemkv"
 path = "src/main.rs"
 
 [dependencies]
-libfreemkv = "0.31.6"
-freemkv-keysources = "0.31"
+libfreemkv = "1.0.0-rc.1"
+freemkv-keysources = "1.0.0-rc.1"
 isolang = "2"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 ureq = { version = "2", features = ["json"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 serde_json = "1"
@@ -34,3 +35,7 @@ mimalloc = "0.1"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# Local build override: build against the in-tree libfreemkv (carries the
+# HEVC param-set re-assert fix) instead of the published 0.31.6. Remove once
+# libfreemkv 0.31.7 is published and the dependency above is bumped.

@@ -1,13 +1,13 @@
 # freemkv Release Process
 
-**Complete instruction set for releasing v0.X.Y to production.**
+**Complete instruction set for releasing to production.**
 
-Replace `0.X.Z` → `0.X.Y` throughout with your target version. **FOLLOW THIS ORDER EXACTLY. DO NOT THINK. DO NOT DEVIATE. DO NOT OPTIMIZE. These are mandatory instructions, not suggestions.**
+Replace `X.Y.Z` throughout with your target version. **FOLLOW THIS ORDER EXACTLY. DO NOT THINK. DO NOT DEVIATE. DO NOT OPTIMIZE. These are mandatory instructions, not suggestions.**
 
 **FAILURE MODES FROM DEVIATION:**
 - v0.17.2: Tagged before bumping Cargo.toml → CI verify failed
 - v0.18.7: Used `cargo update --workspace` instead of manual Cargo.lock regeneration → libfreemkv 0.18.6 still baked in release  
-- Any time: Skipping pre-commit → Rust 1.94 accepts lints that 1.86 rejects
+- Any time: Skipping pre-commit → Mac default Rust accepts lints that CI's 1.86 rejects
 
 **RULES:**
 1. DO NOT skip steps
@@ -25,7 +25,7 @@ Replace `0.X.Z` → `0.X.Y` throughout with your target version. **FOLLOW THIS O
 rustup toolchain install 1.86 --component clippy,rustfmt
 ```
 
-CI uses Rust 1.86 pinned in `.github/workflows/ci.yml`. Mac default (e.g., 1.94) accepts lints that 1.86 rejects — always use `+1.86` locally before pushing.
+CI uses Rust 1.86 pinned in `.github/workflows/ci.yml`. The Mac default toolchain is newer and accepts lints that 1.86 rejects — always use `+1.86` locally before pushing.
 
 ### Local Verification Commands
 ```bash
@@ -35,12 +35,12 @@ cargo +1.86 test --tests
 cargo +1.86 build --release
 ```
 
-Run the workspace pre-commit script to execute all checks across the workspace:
+Run the Rust 1.86 pre-commit checks (the same fmt + clippy + tests CI runs):
 ```bash
-cd ~/freemkv
-./precommit.sh              # all crates
-./precommit.sh autorip      # one crate
-./precommit.sh --no-tests   # fmt+clippy only (faster)
+cargo +1.86 fmt --check                             # all crates
+cargo +1.86 clippy --locked -- -D warnings          # all crates
+cargo +1.86 test                                    # all crates
+cargo +1.86 clippy -p freemkv-autorip --locked -- -D warnings   # one crate
 ```
 
 ---
@@ -61,14 +61,14 @@ libfreemkv must be published before downstream crates can use the new version.
 
 ### Step 1: Bump Version
 
-Edit `Cargo.toml` to change `version = "0.18.24"` to `version = "0.18.25"` (increment last digit):
+Edit `Cargo.toml` to change the `version` field to the new target version:
 ```bash
 cd ~/freemkv/libfreemkv
 # Manual edit preferred for clarity:
 nano Cargo.toml  # or use your editor
-# Change line: version = "0.18.24" → version = "0.18.25"
+# Change line: version = "OLD" → version = "0.X.Y"
 
-git add Cargo.toml && git commit -m "v0.18.25: bump version"
+git add Cargo.toml && git commit -m "v0.X.Y: bump version"
 git push origin main
 ```
 
@@ -251,10 +251,10 @@ If still failing after 15 min, **STOP** — investigate index sync issues. Do no
 
 ### Pre-commit Checklist
 ```bash
-# From workspace root
+# From workspace root (Rust 1.86 — matches CI)
+cargo +1.86 fmt --check
 cargo +1.86 clippy --locked -- -D warnings
 cargo +1.86 test --tests
-./precommit.sh
 ```
 
 **STOP IF PRE-COMMIT FAILS** — do not proceed until all checks pass.
@@ -305,7 +305,7 @@ git tag -a v0.X.Y -m "v0.X.Y" && git push origin v0.X.Y --force
 ## References
 
 - CI workflows: `.github/workflows/ci.yml`, `.github/workflows/release.yml`
-- Pre-commit script: workspace `precommit.sh`
+- Pre-commit checks (Rust 1.86): `cargo +1.86 fmt --check`, `cargo +1.86 clippy --locked -- -D warnings`, `cargo +1.86 test`
 - Release automation: workspace `release.sh`
 - Test plan: internal test plan
 - Watchtower pause guidance: see release notes
@@ -318,6 +318,6 @@ git tag -a v0.X.Y -m "v0.X.Y" && git push origin v0.X.Y --force
 |-------------|-----------|--------|
 | v0.17.2 | Tagged before bumping Cargo.toml | CI verify job failed, release blocked |
 | v0.18.7 | Used `cargo update --workspace` | libfreemkv 0.18.6 baked in release image |
-| Any time | Skipped Rust 1.86 requirement | Mac default (1.94) accepts lints that CI rejects |
+| Any time | Skipped Rust 1.86 requirement | Mac default toolchain accepts lints that CI rejects |
 
 **IF ANY STEP FAILS:** STOP immediately. Report the exact error. Do not proceed until resolved.

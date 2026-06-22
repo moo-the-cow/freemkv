@@ -32,14 +32,19 @@ jobs:
         include:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
+            asset: freemkv-x86_64-linux
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
+            asset: freemkv-aarch64-linux
           - target: x86_64-apple-darwin
             os: macos-latest
+            asset: freemkv-x86_64-macos
           - target: aarch64-apple-darwin
             os: macos-latest
+            asset: freemkv-aarch64-macos
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+            asset: freemkv-x86_64-windows.exe
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -82,8 +87,18 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
+          # Versioned + unversioned tarballs (existing convention).
           tar czf "../../../freemkv-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" freemkv
           tar czf "../../../freemkv-${{ matrix.target }}.tar.gz" freemkv
+          cd ../../..
+          # Plain, runnable binary asset (download → chmod +x → run).
+          cp "target/${{ matrix.target }}/release/freemkv" "${{ matrix.asset }}"
+          chmod +x "${{ matrix.asset }}"
+          shasum -a 256 \
+            "freemkv-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" \
+            "freemkv-${{ matrix.target }}.tar.gz" \
+            "${{ matrix.asset }}" \
+            > "${{ matrix.asset }}.sha256"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -91,6 +106,10 @@ jobs:
         run: |
           Compress-Archive -Path "target/${{ matrix.target }}/release/freemkv.exe" -DestinationPath "freemkv-${{ github.ref_name }}-${{ matrix.target }}.zip"
           Compress-Archive -Path "target/${{ matrix.target }}/release/freemkv.exe" -DestinationPath "freemkv-${{ matrix.target }}.zip"
+          # Plain, runnable binary asset.
+          Copy-Item "target/${{ matrix.target }}/release/freemkv.exe" "${{ matrix.asset }}"
+          $h = Get-FileHash -Algorithm SHA256 "${{ matrix.asset }}"
+          "$($h.Hash.ToLower())  ${{ matrix.asset }}" | Out-File -Encoding ascii "${{ matrix.asset }}.sha256"
 
       - name: Upload
         uses: softprops/action-gh-release@v2
@@ -98,6 +117,8 @@ jobs:
           files: |
             *.tar.gz
             *.zip
+            ${{ matrix.asset }}
+            ${{ matrix.asset }}.sha256
 
   update-homepage:
     needs: build
