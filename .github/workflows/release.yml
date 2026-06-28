@@ -1,10 +1,15 @@
 name: Release
 
 on:
-  workflow_dispatch:  # Manual trigger only
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (optional - will use Cargo.toml if not specified)'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -19,62 +24,59 @@ jobs:
       - name: Verify Cargo.toml version matches tag
         run: |
           CARGO_VER="v$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')"
-          echo "Version match: $CARGO_VER"
-
-  # Tests run as a PARALLEL TRIPWIRE: they fail the run if they fail, but the
-  # build job does NOT `needs:` this job, so the artifact build starts the moment
-  # `verify` passes rather than serializing behind the test suite. The tag
-  # decision was already gated by the local precommit (same Rust 1.86, same
-  # commit) — CI tests here are a safety net, not the gate.
-  test:
-    needs: verify
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.86.0
-        with:
-          targets: x86_64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@v2
-      - name: Install musl tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
-      - name: Test
-        run: cargo test --target x86_64-unknown-linux-musl
+          
+          # For manual dispatch, skip verification or use provided version
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "${{ inputs.version }}" ]; then
+              if [ "${{ inputs.version }}" != "$CARGO_VER" ]; then
+                echo "::warning::Manual version ${{ inputs.version }} differs from Cargo.toml version $CARGO_VER"
+              else
+                echo "Version match: $CARGO_VER"
+              fi
+            else
+              echo "Manual run without version check, using Cargo.toml version: $CARGO_VER"
+            fi
+            # Set output for later use
+            echo "version=$CARGO_VER" >> $GITHUB_OUTPUT
+          else
+            # For tag pushes, enforce strict matching
+            if [ "$CARGO_VER" != "${{ github.ref_name }}" ]; then
+              echo "::error::Cargo.toml says $CARGO_VER but tag is ${{ github.ref_name }}"
+              exit 1
+            fi
+            echo "Version match: $CARGO_VER"
+            echo "version=$CARGO_VER" >> $GITHUB_OUTPUT
+          fi
+        id: verify
 
   build:
-    # NOTE: deliberately does NOT `needs: test` — see the test job above.
     needs: verify
     strategy:
       fail-fast: false
       matrix:
-        # x86_64-apple-darwin is intentionally dropped: it has a pre-existing
-        # linker issue on the macOS runners and built nothing (a no-op leg that
-        # only added wall-clock to the matrix). aarch64-apple-darwin covers
-        # macOS. Fix the linker before re-adding x86_64 macOS.
         include:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            asset: freemkv-x86_64-linux
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
-            asset: freemkv-aarch64-linux
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            macos_deployment_target: "10.12"
           - target: aarch64-apple-darwin
             os: macos-latest
-            asset: freemkv-aarch64-macos
+            macos_deployment_target: "11.0"
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            asset: freemkv-x86_64-windows.zip
 
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          submodules: true
+          
       - uses: dtolnay/rust-toolchain@1.86.0
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
 
       - name: Install musl tools
         if: contains(matrix.target, 'musl')
@@ -88,52 +90,75 @@ jobs:
           curl -sL https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-musl.tar.gz | tar xz
           sudo mv cross /usr/local/bin/
 
-      # Per-target test step removed: tests run once in the dedicated parallel
-      # `test` job, off the build critical path.
-
-      - name: Build (native)
-        if: matrix.target != 'aarch64-unknown-linux-musl'
-        shell: bash
+      - name: Setup macOS environment
+        if: runner.os == 'macOS'
         run: |
-          # Ubuntu's gcc defaults to -D_FORTIFY_SOURCE=2 which makes
-          # mimalloc-sys (transitive C dep) emit calls to glibc-only
-          # __memcpy_chk / __memset_chk that aren't in musl. Disable
-          # fortify for the C portion of the build.
-          export CFLAGS="-U_FORTIFY_SOURCE"
-          cargo build --release --target ${{ matrix.target }}
+          # Set macOS deployment target
+          echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.macos_deployment_target }}" >> $GITHUB_ENV
+          # Install required tools
+          brew install coreutils
 
-      - name: Build (cross)
+      - name: Test (Linux only)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: cargo test --target ${{ matrix.target }}
+
+      - name: Build (Linux musl)
+        if: contains(matrix.target, 'musl') && matrix.target != 'aarch64-unknown-linux-musl'
+        env:
+          CFLAGS: "-U_FORTIFY_SOURCE"
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build (Linux aarch64 cross)
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: cross build --release --target ${{ matrix.target }}
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_deployment_target }}
+        run: |
+          # Force the correct architecture for all C/C++ compilations
+          ARCH="${{ matrix.target == 'x86_64-apple-darwin' && 'x86_64' || 'arm64' }}"
+          export CC="clang -arch ${ARCH}"
+          export CXX="clang++ -arch ${ARCH}"
+          
+          # Clean any cached builds to avoid arch conflicts
+          cargo clean
+          
+          # Build with explicit target (no RUSTFLAGS to avoid CPU issues when cross-compiling)
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          # Versioned + unversioned tarballs (existing convention).
-          tar czf "../../../freemkv-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" freemkv
-          tar czf "../../../freemkv-${{ matrix.target }}.tar.gz" freemkv
-          cd ../../..
-          # Plain, runnable binary asset (download → chmod +x → run).
-          cp "target/${{ matrix.target }}/release/freemkv" "${{ matrix.asset }}"
-          chmod +x "${{ matrix.asset }}"
-          shasum -a 256 \
-            "freemkv-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" \
-            "freemkv-${{ matrix.target }}.tar.gz" \
-            "${{ matrix.asset }}" \
-            > "${{ matrix.asset }}.sha256"
+          VERSION="${{ needs.verify.outputs.version || github.ref_name }}"
+          # Handle binary name (freemkv on Unix, no extension)
+          if [ -f "freemkv" ]; then
+            tar czf "../../../freemkv-${VERSION}-${{ matrix.target }}.tar.gz" freemkv
+            tar czf "../../../freemkv-${{ matrix.target }}.tar.gz" freemkv
+          else
+            echo "Binary not found in $(pwd)"
+            ls -la
+            exit 1
+          fi
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Windows ships as a .zip ONLY (no bare .exe). Versioned + unversioned,
-          # mirroring the Unix tarball convention; ${{ matrix.asset }} is the
-          # unversioned .zip the download page links.
-          Compress-Archive -Path "target/${{ matrix.target }}/release/freemkv.exe" -DestinationPath "freemkv-${{ github.ref_name }}-x86_64-windows.zip"
-          Compress-Archive -Path "target/${{ matrix.target }}/release/freemkv.exe" -DestinationPath "${{ matrix.asset }}"
-          $h = Get-FileHash -Algorithm SHA256 "${{ matrix.asset }}"
-          "$($h.Hash.ToLower())  ${{ matrix.asset }}" | Out-File -Encoding ascii "${{ matrix.asset }}.sha256"
+          $VERSION = "${{ needs.verify.outputs.version || github.ref_name }}"
+          if (Test-Path "target/${{ matrix.target }}/release/freemkv.exe") {
+            Compress-Archive -Path "target/${{ matrix.target }}/release/freemkv.exe" -DestinationPath "freemkv-${VERSION}-${{ matrix.target }}.zip"
+            Compress-Archive -Path "target/${{ matrix.target }}/release/freemkv.exe" -DestinationPath "freemkv-${{ matrix.target }}.zip"
+          } else {
+            Write-Error "Binary not found"
+            exit 1
+          }
 
       - name: Upload
         uses: softprops/action-gh-release@v2
@@ -141,12 +166,11 @@ jobs:
           files: |
             *.tar.gz
             *.zip
-            ${{ matrix.asset }}
-            ${{ matrix.asset }}.sha256
+          tag_name: ${{ needs.verify.outputs.version || github.ref_name }}
 
   update-homepage:
-    needs: build
-    if: always() && needs.build.result != 'cancelled'
+    needs: [verify, build]
+    if: always() && needs.build.result != 'cancelled' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Update org README with new version
@@ -155,4 +179,4 @@ jobs:
           token: ${{ secrets.ORG_DISPATCH_TOKEN }}
           repository: freemkv/.github
           event-type: new-release
-          client-payload: '{"version": "${{ github.ref_name }}"}'
+          client-payload: '{"version": "${{ needs.verify.outputs.version || github.ref_name }}"}'
